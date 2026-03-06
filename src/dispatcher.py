@@ -15,6 +15,15 @@ from .db import Database
 
 log = logging.getLogger("voltron.dispatcher")
 
+# Per-repo locks to serialize git operations (fetch/worktree) for the same repo
+_repo_locks: dict[int, asyncio.Lock] = {}
+
+
+def _get_repo_lock(repo_id: int) -> asyncio.Lock:
+    if repo_id not in _repo_locks:
+        _repo_locks[repo_id] = asyncio.Lock()
+    return _repo_locks[repo_id]
+
 BRANCH_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9/_-]{0,100}$")
 GITHUB_URL_RE = re.compile(
     r"^https://github\.com/[a-zA-Z0-9._-]+/[a-zA-Z0-9._-]+(\.git)?$"
@@ -88,7 +97,7 @@ async def clone_or_fetch(repo: dict, config: Config) -> Path:
     if local_path.exists() and (local_path / ".git").exists():
         log.info("Fetching %s", repo["name"])
         rc, _, err = await run_cmd(
-            "git", "fetch", "--all", "--prune", cwd=local_path
+            "git", "fetch", "--all", "--prune", "--force", cwd=local_path
         )
         if rc != 0:
             raise RuntimeError(f"git fetch failed: {err}")
@@ -333,18 +342,19 @@ async def dispatch_task(task: dict, config: Config, db: Database):
         if not repo:
             raise ValueError(f"Repo {task['repo_id']} not found")
 
-        # Clone/fetch
-        await db.add_log(task_id, "Fetching repository...")
-        repo_path = await clone_or_fetch(repo, config)
+        # Serialize git operations per-repo (fetch + worktree creation)
+        repo_lock = _get_repo_lock(repo["id"])
+        async with repo_lock:
+            await db.add_log(task_id, "Fetching repository...")
+            repo_path = await clone_or_fetch(repo, config)
 
-        # Create worktree
-        branch = make_branch_name(task_id, task["prompt"])
-        await db.update_task(task_id, branch_name=branch)
-        await db.add_log(task_id, f"Creating worktree on branch {branch}")
-        worktree_path = await setup_worktree(
-            repo_path, task_id, branch, repo["default_branch"],
-        )
-        await db.update_task(task_id, worktree_path=str(worktree_path))
+            branch = make_branch_name(task_id, task["prompt"])
+            await db.update_task(task_id, branch_name=branch)
+            await db.add_log(task_id, f"Creating worktree on branch {branch}")
+            worktree_path = await setup_worktree(
+                repo_path, task_id, branch, repo["default_branch"],
+            )
+            await db.update_task(task_id, worktree_path=str(worktree_path))
 
         # Run agent
         await db.add_log(task_id, "Running agent...")
