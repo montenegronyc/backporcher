@@ -6,7 +6,6 @@ import logging
 import os
 import re
 import signal
-import shlex
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlparse
@@ -14,11 +13,9 @@ from urllib.parse import urlparse
 from .config import Config
 from .db import Database
 
-log = logging.getLogger("compound.dispatcher")
+log = logging.getLogger("voltron.dispatcher")
 
-# Strict pattern for branch names — alphanumeric, hyphens, slashes only
 BRANCH_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9/_-]{0,100}$")
-# GitHub URL pattern
 GITHUB_URL_RE = re.compile(
     r"^https://github\.com/[a-zA-Z0-9._-]+/[a-zA-Z0-9._-]+(\.git)?$"
 )
@@ -26,35 +23,33 @@ GITHUB_URL_RE = re.compile(
 
 def validate_github_url(url: str, config: Config) -> str:
     """Validate and normalize a GitHub repo URL."""
+    url = url.strip().rstrip("/")
     parsed = urlparse(url)
     if parsed.scheme != "https":
         raise ValueError("Only HTTPS git URLs are allowed")
     if parsed.hostname not in config.allowed_git_hosts:
         raise ValueError(f"Host {parsed.hostname} not in allowed list")
-    if not GITHUB_URL_RE.match(url.rstrip("/")):
+    if not GITHUB_URL_RE.match(url):
         raise ValueError("Invalid GitHub URL format")
-    clean = url.rstrip("/")
-    if not clean.endswith(".git"):
-        clean += ".git"
-    return clean
+    return url
 
 
 def repo_name_from_url(url: str) -> str:
-    """Extract 'owner/repo' from a GitHub URL."""
+    """Extract repo short name (e.g. 'valibjorn') from a GitHub URL."""
     parsed = urlparse(url)
     path = parsed.path.strip("/").removesuffix(".git")
     parts = path.split("/")
     if len(parts) != 2:
-        raise ValueError(f"Expected owner/repo in URL path, got: {path}")
-    return "/".join(parts)
+        raise ValueError(f"Expected owner/repo in URL, got: {path}")
+    return parts[1]  # Just the repo name, not owner/repo
 
 
 def make_branch_name(task_id: int, prompt: str) -> str:
     """Generate a safe branch name from task ID and prompt."""
     slug = re.sub(r"[^a-z0-9]+", "-", prompt.lower().strip())[:40].strip("-")
-    branch = f"compound/{task_id}-{slug}"
+    branch = f"voltron/{task_id}-{slug}"
     if not BRANCH_RE.match(branch):
-        branch = f"compound/{task_id}"
+        branch = f"voltron/{task_id}"
     return branch
 
 
@@ -62,16 +57,13 @@ async def run_cmd(
     *args: str,
     cwd: str | Path | None = None,
     timeout: int = 120,
-    env: dict[str, str] | None = None,
 ) -> tuple[int, str, str]:
     """Run a subprocess with timeout. Returns (returncode, stdout, stderr)."""
-    merged_env = {**os.environ, **(env or {})}
     proc = await asyncio.create_subprocess_exec(
         *args,
         cwd=str(cwd) if cwd else None,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
-        env=merged_env,
     )
     try:
         stdout, stderr = await asyncio.wait_for(
@@ -89,15 +81,13 @@ async def run_cmd(
     )
 
 
-async def clone_or_fetch(
-    db: Database, repo: dict, config: Config
-) -> Path:
+async def clone_or_fetch(repo: dict, config: Config) -> Path:
     """Clone repo if needed, otherwise fetch. Returns local path."""
-    local_path = config.repos_dir / repo["name"].replace("/", "_")
+    local_path = Path(repo["local_path"])
 
     if local_path.exists() and (local_path / ".git").exists():
         log.info("Fetching %s", repo["name"])
-        rc, out, err = await run_cmd(
+        rc, _, err = await run_cmd(
             "git", "fetch", "--all", "--prune", cwd=local_path
         )
         if rc != 0:
@@ -105,36 +95,31 @@ async def clone_or_fetch(
     else:
         log.info("Cloning %s -> %s", repo["github_url"], local_path)
         local_path.mkdir(parents=True, exist_ok=True)
-        rc, out, err = await run_cmd(
+        rc, _, err = await run_cmd(
             "git", "clone", repo["github_url"], str(local_path), timeout=300
         )
         if rc != 0:
             raise RuntimeError(f"git clone failed: {err}")
 
-    await db.update_repo_fetched(repo["id"])
-
-    # Update local_path in DB if not set
-    if not repo.get("local_path"):
-        await db.db.execute(
-            "UPDATE repos SET local_path = ? WHERE id = ?",
-            (str(local_path), repo["id"]),
-        )
-        await db.db.commit()
-
     return local_path
 
 
 async def setup_worktree(
-    repo_path: Path, branch_name: str, default_branch: str
+    repo_path: Path, task_id: int, branch_name: str, default_branch: str,
 ) -> Path:
-    """Create a git worktree for the task. Returns worktree path."""
-    worktree_path = repo_path.parent / f"wt-{branch_name.replace('/', '-')}"
+    """Create a git worktree for the task."""
+    worktree_path = repo_path / ".worktrees" / str(task_id)
 
     # Clean up stale worktree if exists
     if worktree_path.exists():
-        await run_cmd("git", "worktree", "remove", "--force", str(worktree_path), cwd=repo_path)
+        await run_cmd(
+            "git", "worktree", "remove", "--force",
+            str(worktree_path), cwd=repo_path,
+        )
 
-    rc, out, err = await run_cmd(
+    worktree_path.parent.mkdir(parents=True, exist_ok=True)
+
+    rc, _, err = await run_cmd(
         "git", "worktree", "add", "-b", branch_name,
         str(worktree_path), f"origin/{default_branch}",
         cwd=repo_path,
@@ -150,26 +135,26 @@ async def run_agent(
     worktree_path: Path,
     config: Config,
     db: Database,
-) -> tuple[int, str | None, float | None]:
+) -> tuple[int, str | None]:
     """
-    Run claude -p in the worktree. Streams output, logs lines.
-    Returns (exit_code, output_summary, cost_usd).
+    Run claude -p in the worktree. Streams stdout to log file.
+    Returns (exit_code, output_summary).
+    Uses Max subscription — no --max-budget-usd flag.
     """
     prompt = task["prompt"]
     model = task["model"]
-    budget = min(task["max_budget_usd"], config.max_budget_limit_usd)
+    log_file = config.logs_dir / f"{task['id']}.jsonl"
 
     cmd = [
         "claude", "-p",
         "--output-format", "stream-json",
         "--dangerously-skip-permissions",
         "--model", model,
-        "--max-budget-usd", str(budget),
         prompt,
     ]
 
-    log.info("Starting agent for task %d: %s", task["id"], shlex.join(cmd))
-    await db.add_log(task["id"], f"Starting agent with model={model}, budget=${budget}")
+    log.info("Starting agent for task %d (model=%s)", task["id"], model)
+    await db.add_log(task["id"], f"Starting agent with model={model}")
 
     proc = await asyncio.create_subprocess_exec(
         *cmd,
@@ -178,59 +163,49 @@ async def run_agent(
         stderr=asyncio.subprocess.PIPE,
     )
 
-    # Store PID for cancellation
     await db.update_task(task["id"], agent_pid=proc.pid)
 
     output_summary = None
-    cost_usd = None
-    last_content = []
-    log_buffer = []
+    last_content: list[str] = []
 
     async def read_stream():
-        nonlocal output_summary, cost_usd
-        async for raw_line in proc.stdout:
-            line = raw_line.decode(errors="replace").strip()
-            if not line:
-                continue
+        nonlocal output_summary
+        with open(log_file, "w") as lf:
+            async for raw_line in proc.stdout:
+                line = raw_line.decode(errors="replace").strip()
+                if not line:
+                    continue
 
-            try:
-                event = json.loads(line)
-            except json.JSONDecodeError:
-                log_buffer.append(line)
-                continue
+                # Write every line to the log file
+                lf.write(line + "\n")
+                lf.flush()
 
-            etype = event.get("type", "")
+                try:
+                    event = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
 
-            if etype == "assistant" and "message" in event:
-                msg = event["message"]
-                if msg.get("content"):
-                    for block in msg["content"]:
+                etype = event.get("type", "")
+
+                if etype == "assistant" and "message" in event:
+                    msg = event["message"]
+                    for block in (msg.get("content") or []):
                         if block.get("type") == "text":
                             last_content.append(block["text"])
-                # Extract cost from usage/stats
-                usage = msg.get("usage", {})
-                if usage:
-                    log_buffer.append(
-                        f"Tokens: in={usage.get('input_tokens', '?')}, "
-                        f"out={usage.get('output_tokens', '?')}"
-                    )
 
-            elif etype == "result":
-                output_summary = event.get("result", "")
-                cost_usd = event.get("cost_usd")
-                if event.get("is_error"):
-                    log_buffer.append(f"Agent error: {output_summary}")
+                elif etype == "result":
+                    output_summary = event.get("result", "")
+                    if event.get("is_error"):
+                        await db.add_log(
+                            task["id"],
+                            f"Agent error: {output_summary[:500]}",
+                            level="error",
+                        )
 
-            elif etype == "content_block_delta":
-                delta = event.get("delta", {})
-                if delta.get("type") == "text_delta":
-                    last_content.append(delta.get("text", ""))
-
-            # Batch-flush logs periodically
-            if len(log_buffer) >= 10:
-                for msg in log_buffer:
-                    await db.add_log(task["id"], msg[:2000])
-                log_buffer.clear()
+                elif etype == "content_block_delta":
+                    delta = event.get("delta", {})
+                    if delta.get("type") == "text_delta":
+                        last_content.append(delta.get("text", ""))
 
     try:
         await asyncio.wait_for(
@@ -239,7 +214,11 @@ async def run_agent(
         await proc.wait()
     except asyncio.TimeoutError:
         log.warning("Task %d timed out after %ds", task["id"], config.task_timeout_seconds)
-        await db.add_log(task["id"], f"TIMEOUT after {config.task_timeout_seconds}s", level="error")
+        await db.add_log(
+            task["id"],
+            f"TIMEOUT after {config.task_timeout_seconds}s",
+            level="error",
+        )
         try:
             proc.send_signal(signal.SIGTERM)
             await asyncio.sleep(5)
@@ -249,57 +228,57 @@ async def run_agent(
             pass
         await proc.wait()
 
-    # Flush remaining logs
-    for msg in log_buffer:
-        await db.add_log(task["id"], msg[:2000])
-
     if not output_summary and last_content:
         output_summary = "".join(last_content)[-2000:]
 
-    return proc.returncode, output_summary, cost_usd
+    await db.add_log(
+        task["id"],
+        f"Agent exited with code {proc.returncode}",
+    )
+
+    return proc.returncode, output_summary
 
 
 async def create_pr(
-    worktree_path: Path,
-    task: dict,
-    repo: dict,
+    worktree_path: Path, task: dict, repo: dict, db: Database,
 ) -> str | None:
-    """Commit, push, and create a PR. Returns PR URL or None."""
-    # Check if there are changes to commit
-    rc, out, _ = await run_cmd("git", "status", "--porcelain", cwd=worktree_path)
-    if rc != 0 or not out.strip():
-        log.info("Task %d: no changes to commit", task["id"])
-        return None
-
-    # Stage all changes
-    rc, _, err = await run_cmd("git", "add", "-A", cwd=worktree_path)
-    if rc != 0:
-        raise RuntimeError(f"git add failed: {err}")
-
-    # Commit
-    commit_msg = f"compound: {task['prompt'][:72]}\n\nTask #{task['id']} via Compound dispatcher"
-    rc, _, err = await run_cmd(
-        "git", "commit", "-m", commit_msg, cwd=worktree_path
+    """Check for commits, push, and create a PR. Returns PR URL or None."""
+    # Check if agent made any commits beyond the base
+    rc, out, _ = await run_cmd(
+        "git", "log", f"origin/{repo['default_branch']}..HEAD",
+        "--oneline", cwd=worktree_path,
     )
-    if rc != 0:
-        raise RuntimeError(f"git commit failed: {err}")
+    if rc != 0 or not out.strip():
+        # Also check for uncommitted changes
+        rc2, out2, _ = await run_cmd("git", "status", "--porcelain", cwd=worktree_path)
+        if not out2.strip():
+            log.info("Task %d: no changes to push", task["id"])
+            return None
+        # Stage + commit uncommitted changes
+        await run_cmd("git", "add", "-A", cwd=worktree_path)
+        commit_msg = f"voltron: {task['prompt'][:72]}\n\nTask #{task['id']}"
+        rc3, _, err = await run_cmd("git", "commit", "-m", commit_msg, cwd=worktree_path)
+        if rc3 != 0:
+            await db.add_log(task["id"], f"git commit failed: {err}", level="error")
+            return None
 
-    # Push
     branch = task["branch_name"]
+    await db.add_log(task["id"], f"Pushing branch {branch}...")
+
     rc, _, err = await run_cmd(
         "git", "push", "-u", "origin", branch,
         cwd=worktree_path, timeout=120,
     )
     if rc != 0:
+        await db.add_log(task["id"], f"git push failed: {err}", level="error")
         raise RuntimeError(f"git push failed: {err}")
 
-    # Create PR
-    pr_title = f"[Compound] {task['prompt'][:60]}"
+    pr_title = f"[voltron] {task['prompt'][:60]}"
     pr_body = (
-        f"## Compound Agent Task #{task['id']}\n\n"
+        f"## Voltron Task #{task['id']}\n\n"
         f"**Prompt:** {task['prompt'][:500]}\n\n"
         f"**Model:** {task['model']}\n\n"
-        f"---\n_Created by Compound dispatcher_"
+        f"---\n_Created by Voltron dispatcher_"
     )
     rc, out, err = await run_cmd(
         "gh", "pr", "create",
@@ -310,12 +289,24 @@ async def create_pr(
         cwd=worktree_path, timeout=60,
     )
     if rc != 0:
-        log.error("PR creation failed: %s", err)
+        await db.add_log(task["id"], f"PR creation failed: {err}", level="error")
         return None
 
     pr_url = out.strip()
     log.info("Created PR: %s", pr_url)
     return pr_url
+
+
+async def cleanup_worktree(repo_path: Path, task_id: int) -> bool:
+    """Remove a task's worktree."""
+    worktree_path = repo_path / ".worktrees" / str(task_id)
+    if not worktree_path.exists():
+        return False
+    rc, _, err = await run_cmd(
+        "git", "worktree", "remove", "--force",
+        str(worktree_path), cwd=repo_path,
+    )
+    return rc == 0
 
 
 async def dispatch_task(task: dict, config: Config, db: Database):
@@ -328,27 +319,24 @@ async def dispatch_task(task: dict, config: Config, db: Database):
 
         # Clone/fetch
         await db.add_log(task_id, "Fetching repository...")
-        repo_path = await clone_or_fetch(db, repo, config)
+        repo_path = await clone_or_fetch(repo, config)
 
         # Create worktree
         branch = make_branch_name(task_id, task["prompt"])
         await db.update_task(task_id, branch_name=branch)
         await db.add_log(task_id, f"Creating worktree on branch {branch}")
         worktree_path = await setup_worktree(
-            repo_path, branch, repo["default_branch"]
+            repo_path, task_id, branch, repo["default_branch"],
         )
         await db.update_task(task_id, worktree_path=str(worktree_path))
 
         # Run agent
         await db.add_log(task_id, "Running agent...")
-        exit_code, summary, cost = await run_agent(
-            task, worktree_path, config, db
-        )
+        exit_code, summary = await run_agent(task, worktree_path, config, db)
         await db.update_task(
             task_id,
             exit_code=exit_code,
             output_summary=summary[:4000] if summary else None,
-            cost_usd=cost,
         )
 
         if exit_code != 0:
@@ -359,24 +347,26 @@ async def dispatch_task(task: dict, config: Config, db: Database):
                 error_message=f"Agent exited with code {exit_code}",
                 completed_at=now,
             )
-            await db.add_log(task_id, f"Agent failed with exit code {exit_code}", level="error")
+            await db.add_log(task_id, f"Agent failed (exit {exit_code})", level="error")
             return
 
         # Create PR
         await db.add_log(task_id, "Creating pull request...")
-        pr_url = await create_pr(worktree_path, task, repo)
+        # Re-read task to get branch_name
+        task = await db.get_task(task_id)
+        pr_url = await create_pr(worktree_path, task, repo, db)
         now = datetime.now(timezone.utc).isoformat()
 
         if pr_url:
             await db.update_task(
-                task_id, status="pr_created", pr_url=pr_url, completed_at=now
+                task_id, status="pr_created", pr_url=pr_url, completed_at=now,
             )
             await db.add_log(task_id, f"PR created: {pr_url}")
         else:
             await db.update_task(
-                task_id, status="completed", completed_at=now
+                task_id, status="completed", completed_at=now,
             )
-            await db.add_log(task_id, "Completed (no changes to PR)")
+            await db.add_log(task_id, "Completed (no changes)")
 
     except Exception as e:
         log.exception("Task %d failed", task_id)

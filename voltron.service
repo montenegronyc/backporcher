@@ -1,0 +1,32 @@
+[Unit]
+Description=Voltron Agent Dispatcher Worker
+After=network.target
+
+[Service]
+Type=simple
+User=administrator
+Group=administrator
+WorkingDirectory=/home/administrator/voltron
+ExecStart=/home/administrator/voltron/.venv/bin/voltron worker
+Restart=on-failure
+RestartSec=10
+
+# Environment
+Environment=VOLTRON_BASE_DIR=/home/administrator/voltron
+Environment=VOLTRON_MAX_CONCURRENCY=2
+
+# Security hardening
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=no
+ReadWritePaths=/home/administrator/voltron/data
+ReadWritePaths=/home/administrator/voltron/repos
+ReadWritePaths=/home/administrator/voltron/logs
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=voltron
+
+[Install]
+WantedBy=multi-user.target
