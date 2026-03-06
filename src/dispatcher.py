@@ -127,6 +127,10 @@ async def setup_worktree(
     if rc != 0:
         raise RuntimeError(f"git worktree add failed: {err}")
 
+    # Configure git identity in the worktree
+    await run_cmd("git", "config", "user.name", "Voltron", cwd=worktree_path)
+    await run_cmd("git", "config", "user.email", "voltron@dispatch.local", cwd=worktree_path)
+
     return worktree_path
 
 
