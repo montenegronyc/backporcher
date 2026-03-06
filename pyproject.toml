@@ -1,0 +1,13 @@
+[project]
+name = "compound"
+version = "0.1.0"
+description = "Parallel Claude Code agent dispatcher with web dashboard"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.30.0",
+    "aiosqlite>=0.20.0",
+]
+
+[project.scripts]
+compound = "src.server:main"
