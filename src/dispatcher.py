@@ -148,6 +148,7 @@ async def run_agent(
     cmd = [
         "claude", "-p",
         "--output-format", "stream-json",
+        "--verbose",
         "--dangerously-skip-permissions",
         "--model", model,
         prompt,
@@ -211,9 +212,16 @@ async def run_agent(
                     if delta.get("type") == "text_delta":
                         last_content.append(delta.get("text", ""))
 
+    async def read_stderr():
+        async for raw_line in proc.stderr:
+            line = raw_line.decode(errors="replace").strip()
+            if line:
+                await db.add_log(task["id"], f"stderr: {line[:500]}", level="warn")
+
     try:
         await asyncio.wait_for(
-            read_stream(), timeout=config.task_timeout_seconds
+            asyncio.gather(read_stream(), read_stderr()),
+            timeout=config.task_timeout_seconds,
         )
         await proc.wait()
     except asyncio.TimeoutError:
