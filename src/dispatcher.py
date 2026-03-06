@@ -156,11 +156,15 @@ async def run_agent(
     log.info("Starting agent for task %d (model=%s)", task["id"], model)
     await db.add_log(task["id"], f"Starting agent with model={model}")
 
+    # Clean env: unset CLAUDECODE to avoid nested-session detection
+    agent_env = {k: v for k, v in os.environ.items() if k != "CLAUDECODE"}
+
     proc = await asyncio.create_subprocess_exec(
         *cmd,
         cwd=str(worktree_path),
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
+        env=agent_env,
     )
 
     await db.update_task(task["id"], agent_pid=proc.pid)
