@@ -1,5 +1,6 @@
 """SQLite database layer with WAL mode and parameterized queries."""
 
+import asyncio
 import sqlite3
 import aiosqlite
 from pathlib import Path
@@ -49,11 +50,12 @@ CREATE INDEX IF NOT EXISTS idx_task_logs_task_id ON task_logs(task_id);
 
 
 class Database:
-    """Async SQLite database wrapper."""
+    """Async SQLite database wrapper with write serialization."""
 
     def __init__(self, db_path: Path):
         self.db_path = db_path
         self._db: aiosqlite.Connection | None = None
+        self._write_lock = asyncio.Lock()
 
     async def connect(self):
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -101,13 +103,14 @@ class Database:
         self, name: str, github_url: str, local_path: str,
         default_branch: str = "main",
     ) -> int:
-        async with self.db.execute(
-            "INSERT INTO repos (name, github_url, local_path, default_branch) "
-            "VALUES (?, ?, ?, ?)",
-            (name, github_url, local_path, default_branch),
-        ) as cur:
-            await self.db.commit()
-            return cur.lastrowid
+        async with self._write_lock:
+            async with self.db.execute(
+                "INSERT INTO repos (name, github_url, local_path, default_branch) "
+                "VALUES (?, ?, ?, ?)",
+                (name, github_url, local_path, default_branch),
+            ) as cur:
+                await self.db.commit()
+                return cur.lastrowid
 
     # --- Tasks ---
 
@@ -143,25 +146,27 @@ class Database:
     async def create_task(
         self, repo_id: int, prompt: str, model: str = "sonnet",
     ) -> int:
-        async with self.db.execute(
-            "INSERT INTO tasks (repo_id, prompt, model) VALUES (?, ?, ?)",
-            (repo_id, prompt, model),
-        ) as cur:
-            await self.db.commit()
-            return cur.lastrowid
+        async with self._write_lock:
+            async with self.db.execute(
+                "INSERT INTO tasks (repo_id, prompt, model) VALUES (?, ?, ?)",
+                (repo_id, prompt, model),
+            ) as cur:
+                await self.db.commit()
+                return cur.lastrowid
 
     async def claim_next_queued(self) -> dict | None:
         """Atomically claim the oldest queued task."""
-        now = datetime.now(timezone.utc).isoformat()
-        async with self.db.execute(
-            "UPDATE tasks SET status = 'working', started_at = ? "
-            "WHERE id = (SELECT id FROM tasks WHERE status = 'queued' "
-            "ORDER BY created_at ASC LIMIT 1) RETURNING *",
-            (now,),
-        ) as cur:
-            row = await cur.fetchone()
-            await self.db.commit()
-            return dict(row) if row else None
+        async with self._write_lock:
+            now = datetime.now(timezone.utc).isoformat()
+            async with self.db.execute(
+                "UPDATE tasks SET status = 'working', started_at = ? "
+                "WHERE id = (SELECT id FROM tasks WHERE status = 'queued' "
+                "ORDER BY created_at ASC LIMIT 1) RETURNING *",
+                (now,),
+            ) as cur:
+                row = await cur.fetchone()
+                await self.db.commit()
+                return dict(row) if row else None
 
     async def update_task(self, task_id: int, **fields):
         if not fields:
@@ -174,10 +179,11 @@ class Database:
         fields = {k: v for k, v in fields.items() if k in allowed}
         if not fields:
             return
-        sets = ", ".join(f"{k} = ?" for k in fields)
-        vals = list(fields.values()) + [task_id]
-        await self.db.execute(f"UPDATE tasks SET {sets} WHERE id = ?", vals)
-        await self.db.commit()
+        async with self._write_lock:
+            sets = ", ".join(f"{k} = ?" for k in fields)
+            vals = list(fields.values()) + [task_id]
+            await self.db.execute(f"UPDATE tasks SET {sets} WHERE id = ?", vals)
+            await self.db.commit()
 
     async def count_active(self) -> int:
         async with self.db.execute(
@@ -196,11 +202,12 @@ class Database:
     # --- Task Logs ---
 
     async def add_log(self, task_id: int, message: str, level: str = "info"):
-        await self.db.execute(
-            "INSERT INTO task_logs (task_id, level, message) VALUES (?, ?, ?)",
-            (task_id, level, message),
-        )
-        await self.db.commit()
+        async with self._write_lock:
+            await self.db.execute(
+                "INSERT INTO task_logs (task_id, level, message) VALUES (?, ?, ?)",
+                (task_id, level, message),
+            )
+            await self.db.commit()
 
     async def get_logs(
         self, task_id: int, limit: int = 20, offset: int = 0,
