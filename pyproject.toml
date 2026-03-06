@@ -1,3 +1,4 @@
+# Voltron - Parallel Claude Code Agent Dispatcher
 [project]
 name = "voltron"
 version = "0.1.0"
