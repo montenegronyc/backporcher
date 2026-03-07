@@ -11,7 +11,8 @@ from .dispatcher import dispatch_task, orchestrate_batch, retry_with_ci_context,
 from .github import (
     close_issue, close_pr, comment_on_issue, comment_on_pr,
     extract_pr_number_from_url, find_new_issues,
-    claim_issue, get_ci_failure_logs, get_pr_ci_status, merge_pr,
+    claim_issue, get_ci_failure_logs, get_pr_ci_status,
+    is_pr_conflicting, merge_pr,
     repo_full_name_from_url, update_issue_labels,
 )
 
@@ -207,6 +208,24 @@ class WorkerDaemon:
                 if self.semaphore._value > 0:
                     task = await self.db.claim_next_queued()
                     if task:
+                        # Guard against aiosqlite commit visibility race:
+                        # back-to-back claims may not see the previous commit,
+                        # so verify the dependency is actually met.
+                        dep_id = task.get("depends_on_task_id")
+                        if dep_id:
+                            dep = await self.db.get_task(dep_id)
+                            if not dep or dep["status"] != "completed":
+                                dep_status = dep["status"] if dep else "missing"
+                                log.warning(
+                                    "Task #%d claimed but dep #%d is '%s', re-queuing",
+                                    task["id"], dep_id, dep_status,
+                                )
+                                await self.db.update_task(
+                                    task["id"], status="queued", started_at=None,
+                                )
+                                await asyncio.sleep(0.1)
+                                continue
+
                         log.info(
                             "Claimed task #%d: %s",
                             task["id"], task["prompt"][:80],
@@ -343,6 +362,38 @@ class WorkerDaemon:
                     elif ci.state == "failure":
                         await self._handle_ci_failure(task, repo_full, ci)
 
+                # Sweep ci_passed tasks stuck due to merge failure
+                stuck_tasks = await self.db.list_tasks_by_status("ci_passed")
+                for task in stuck_tasks:
+                    pr_number = task.get("pr_number")
+                    if not pr_number:
+                        continue
+                    repo_full = repo_full_name_from_url(task["github_url"])
+                    conflicting = await is_pr_conflicting(repo_full, pr_number)
+                    if conflicting:
+                        task_id = task["id"]
+                        log.warning("Task #%d: PR #%d still conflicting, re-queuing", task_id, pr_number)
+                        await self.db.add_log(
+                            task_id,
+                            f"PR #{pr_number} has merge conflicts — closing and re-queuing",
+                            level="warn",
+                        )
+                        await close_pr(
+                            repo_full, pr_number,
+                            comment="Merge conflict detected. Closing PR and re-running agent from latest main.",
+                        )
+                        await self.db.update_task(
+                            task_id,
+                            status="queued",
+                            branch_name=None,
+                            worktree_path=None,
+                            pr_url=None,
+                            pr_number=None,
+                            review_summary=None,
+                            started_at=None,
+                            completed_at=None,
+                        )
+
                 # Process retrying tasks
                 retry_tasks = await self.db.list_retrying_tasks()
                 for task in retry_tasks:
@@ -369,22 +420,48 @@ class WorkerDaemon:
                 await self.db.update_task(task_id, status="completed")
                 await self.db.add_log(task_id, f"PR #{pr_number} merged (squash)")
                 log.info("Task #%d: PR #%d merged", task_id, pr_number)
+
+                issue_num = task.get("github_issue_number")
+                if issue_num:
+                    await update_issue_labels(
+                        repo_full, issue_num,
+                        add=["voltron-done"],
+                        remove=["voltron-in-progress"],
+                    )
+                    await comment_on_issue(
+                        repo_full, issue_num,
+                        "CI passed. PR has been merged. Closing issue.",
+                    )
+                    await close_issue(repo_full, issue_num)
+                return
+
+            # Merge failed — check if it's a conflict
+            conflicting = await is_pr_conflicting(repo_full, pr_number)
+            if conflicting:
+                await self.db.add_log(
+                    task_id,
+                    f"PR #{pr_number} has merge conflicts — closing and re-queuing for fresh attempt",
+                    level="warn",
+                )
+                log.warning("Task #%d: PR #%d has merge conflicts, re-queuing", task_id, pr_number)
+                await close_pr(
+                    repo_full, pr_number,
+                    comment="Merge conflict detected. Closing PR and re-running agent from latest main.",
+                )
+                await self.db.update_task(
+                    task_id,
+                    status="queued",
+                    branch_name=None,
+                    worktree_path=None,
+                    pr_url=None,
+                    pr_number=None,
+                    review_summary=None,
+                    started_at=None,
+                    completed_at=None,
+                )
             else:
                 await self.db.add_log(task_id, f"Failed to merge PR #{pr_number}", level="warn")
                 log.warning("Task #%d: merge failed for PR #%d", task_id, pr_number)
-
-        issue_num = task.get("github_issue_number")
-        if issue_num:
-            await update_issue_labels(
-                repo_full, issue_num,
-                add=["voltron-done"],
-                remove=["voltron-in-progress"],
-            )
-            await comment_on_issue(
-                repo_full, issue_num,
-                "CI passed. PR has been merged. Closing issue.",
-            )
-            await close_issue(repo_full, issue_num)
 
     async def _handle_ci_failure(self, task: dict, repo_full: str, ci):
         """CI failed — retry or mark failed."""

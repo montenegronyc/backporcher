@@ -344,6 +344,23 @@ async def close_pr(
     return True
 
 
+async def is_pr_conflicting(repo_full_name: str, pr_number: int) -> bool:
+    """Check if a PR has merge conflicts."""
+    rc, out, _ = await _run_gh(
+        "pr", "view",
+        "--repo", repo_full_name,
+        str(pr_number),
+        "--json", "mergeable",
+    )
+    if rc != 0:
+        return False
+    try:
+        data = json.loads(out)
+        return data.get("mergeable") == "CONFLICTING"
+    except (json.JSONDecodeError, KeyError):
+        return False
+
+
 async def merge_pr(
     repo_full_name: str, pr_number: int, method: str = "squash",
 ) -> bool:

@@ -444,6 +444,16 @@ class Database:
         ) as cur:
             return [dict(r) for r in await cur.fetchall()]
 
+    async def list_tasks_by_status(self, status: str) -> list[dict]:
+        """List tasks with a specific status."""
+        async with self.db.execute(
+            "SELECT t.*, r.name as repo_name, r.github_url FROM tasks t "
+            "JOIN repos r ON t.repo_id = r.id "
+            "WHERE t.status = ?",
+            (status,),
+        ) as cur:
+            return [dict(r) for r in await cur.fetchall()]
+
     async def claim_next_queued(self) -> dict | None:
         """Atomically claim the highest-priority queued task whose dependencies are met."""
         async with self._write_lock:

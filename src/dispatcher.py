@@ -134,16 +134,28 @@ async def setup_worktree(
             "git", "worktree", "remove", "--force",
             str(worktree_path), cwd=repo_path,
         )
+        # Force-remove directory if git worktree remove didn't clean it
+        if worktree_path.exists():
+            import shutil
+            shutil.rmtree(str(worktree_path), ignore_errors=True)
 
     # Prune stale worktree refs so branch -D can succeed
     await run_cmd("git", "worktree", "prune", cwd=repo_path)
 
-    # Delete stale branch from a previous attempt (makes re-queue idempotent)
+    # Delete stale local branch from a previous attempt (makes re-queue idempotent)
     rc, _, berr = await run_cmd("git", "branch", "-D", branch_name, cwd=repo_path)
     if rc == 0:
-        log.info("Deleted stale branch %s", branch_name)
+        log.info("Deleted stale local branch %s", branch_name)
     elif "not found" not in berr.lower():
         log.warning("Branch cleanup for %s: %s", branch_name, berr.strip())
+
+    # Delete stale remote branch too (prevents push rejection on re-queue)
+    rc, _, _ = await run_cmd(
+        "git", "push", "origin", "--delete", branch_name,
+        cwd=repo_path, timeout=30,
+    )
+    if rc == 0:
+        log.info("Deleted stale remote branch %s", branch_name)
 
     worktree_path.parent.mkdir(parents=True, exist_ok=True)
 
