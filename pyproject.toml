@@ -1,6 +1,6 @@
 [project]
 name = "voltron"
-version = "0.1.0"
+version = "0.2.0"
 description = "Parallel Claude Code agent dispatcher — CLI + worker daemon"
 requires-python = ">=3.11"
 dependencies = [

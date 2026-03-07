@@ -6,7 +6,9 @@ import aiosqlite
 from pathlib import Path
 from datetime import datetime, timezone
 
-SCHEMA = """
+SCHEMA_VERSION = 3
+
+SCHEMA_V1 = """
 CREATE TABLE IF NOT EXISTS repos (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL UNIQUE,
@@ -48,6 +50,206 @@ CREATE INDEX IF NOT EXISTS idx_tasks_repo_id ON tasks(repo_id);
 CREATE INDEX IF NOT EXISTS idx_task_logs_task_id ON task_logs(task_id);
 """
 
+VALID_STATUSES = (
+    'queued', 'working', 'pr_created', 'reviewing', 'reviewed',
+    'ci_passed', 'retrying', 'completed', 'failed', 'cancelled',
+)
+
+SCHEMA_V3_TASKS = """
+CREATE TABLE tasks_v3 (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    repo_id INTEGER NOT NULL REFERENCES repos(id),
+    prompt TEXT NOT NULL,
+    branch_name TEXT,
+    worktree_path TEXT,
+    status TEXT NOT NULL DEFAULT 'queued'
+        CHECK (status IN ('queued','working','pr_created','reviewing','reviewed','ci_passed','retrying','completed','failed','cancelled')),
+    pr_url TEXT,
+    model TEXT DEFAULT 'sonnet',
+    agent_pid INTEGER,
+    exit_code INTEGER,
+    error_message TEXT,
+    output_summary TEXT,
+    review_summary TEXT,
+    github_issue_number INTEGER,
+    github_issue_url TEXT,
+    pr_number INTEGER,
+    retry_count INTEGER DEFAULT 0,
+    started_at TEXT,
+    completed_at TEXT,
+    created_at TEXT DEFAULT (datetime('now'))
+);
+"""
+
+SCHEMA_V2_TASKS = """
+CREATE TABLE tasks_v2 (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    repo_id INTEGER NOT NULL REFERENCES repos(id),
+    prompt TEXT NOT NULL,
+    branch_name TEXT,
+    worktree_path TEXT,
+    status TEXT NOT NULL DEFAULT 'queued'
+        CHECK (status IN ('queued','working','pr_created','ci_passed','retrying','completed','failed','cancelled')),
+    pr_url TEXT,
+    model TEXT DEFAULT 'sonnet',
+    agent_pid INTEGER,
+    exit_code INTEGER,
+    error_message TEXT,
+    output_summary TEXT,
+    github_issue_number INTEGER,
+    github_issue_url TEXT,
+    pr_number INTEGER,
+    retry_count INTEGER DEFAULT 0,
+    started_at TEXT,
+    completed_at TEXT,
+    created_at TEXT DEFAULT (datetime('now'))
+);
+"""
+
+
+def _get_schema_version(conn) -> int:
+    """Get current schema version. Returns 1 if tasks table exists but no version table."""
+    try:
+        cur = conn.execute("SELECT version FROM schema_version ORDER BY version DESC LIMIT 1")
+        row = cur.fetchone()
+        return row[0] if row else 1
+    except Exception:
+        # No schema_version table — check if tasks table exists (v1)
+        cur = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='tasks'"
+        )
+        return 1 if cur.fetchone() else 0
+
+
+def _migrate_sync(conn):
+    """Run schema migrations (sync, works for both sync and async via raw conn)."""
+    version = _get_schema_version(conn)
+
+    if version == 0:
+        # Fresh database — create v3 tasks table directly (repos/task_logs already created)
+        conn.executescript("""
+CREATE TABLE IF NOT EXISTS tasks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    repo_id INTEGER NOT NULL REFERENCES repos(id),
+    prompt TEXT NOT NULL,
+    branch_name TEXT,
+    worktree_path TEXT,
+    status TEXT NOT NULL DEFAULT 'queued'
+        CHECK (status IN ('queued','working','pr_created','reviewing','reviewed','ci_passed','retrying','completed','failed','cancelled')),
+    pr_url TEXT,
+    model TEXT DEFAULT 'sonnet',
+    agent_pid INTEGER,
+    exit_code INTEGER,
+    error_message TEXT,
+    output_summary TEXT,
+    review_summary TEXT,
+    github_issue_number INTEGER,
+    github_issue_url TEXT,
+    pr_number INTEGER,
+    retry_count INTEGER DEFAULT 0,
+    started_at TEXT,
+    completed_at TEXT,
+    created_at TEXT DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
+CREATE INDEX IF NOT EXISTS idx_tasks_repo_id ON tasks(repo_id);
+""")
+        conn.execute("CREATE TABLE IF NOT EXISTS schema_version (version INTEGER PRIMARY KEY)")
+        conn.execute("INSERT OR REPLACE INTO schema_version (version) VALUES (?)", (SCHEMA_VERSION,))
+        conn.commit()
+        return
+
+    if version < 2:
+        # Migrate from v1 to v2: recreate tasks table with new columns + statuses
+        # Disable FK checks during migration (task_logs references tasks)
+        conn.execute("PRAGMA foreign_keys=OFF")
+        conn.execute("DROP TABLE IF EXISTS tasks_v2")
+        conn.executescript(SCHEMA_V2_TASKS)
+        conn.execute("""
+            INSERT INTO tasks_v2 (
+                id, repo_id, prompt, branch_name, worktree_path, status,
+                pr_url, model, agent_pid, exit_code, error_message,
+                output_summary, started_at, completed_at, created_at,
+                github_issue_number, github_issue_url, pr_number, retry_count
+            )
+            SELECT
+                id, repo_id, prompt, branch_name, worktree_path, status,
+                pr_url, model, agent_pid, exit_code, error_message,
+                output_summary, started_at, completed_at, created_at,
+                NULL, NULL, NULL, 0
+            FROM tasks
+        """)
+        conn.execute("DROP TABLE tasks")
+        conn.execute("ALTER TABLE tasks_v2 RENAME TO tasks")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_tasks_repo_id ON tasks(repo_id)")
+        conn.execute("CREATE TABLE IF NOT EXISTS schema_version (version INTEGER PRIMARY KEY)")
+        conn.execute("INSERT OR REPLACE INTO schema_version (version) VALUES (?)", (SCHEMA_VERSION,))
+        conn.execute("PRAGMA foreign_keys=ON")
+        conn.commit()
+
+    if version < 3:
+        # Migrate to v3: add reviewing/reviewed statuses + review_summary column
+        conn.execute("PRAGMA foreign_keys=OFF")
+        conn.execute("DROP TABLE IF EXISTS tasks_v3")
+        conn.executescript(SCHEMA_V3_TASKS)
+        conn.execute("""
+            INSERT INTO tasks_v3 (
+                id, repo_id, prompt, branch_name, worktree_path, status,
+                pr_url, model, agent_pid, exit_code, error_message,
+                output_summary, review_summary,
+                github_issue_number, github_issue_url, pr_number, retry_count,
+                started_at, completed_at, created_at
+            )
+            SELECT
+                id, repo_id, prompt, branch_name, worktree_path, status,
+                pr_url, model, agent_pid, exit_code, error_message,
+                output_summary, NULL,
+                github_issue_number, github_issue_url, pr_number, retry_count,
+                started_at, completed_at, created_at
+            FROM tasks
+        """)
+        conn.execute("DROP TABLE tasks")
+        conn.execute("ALTER TABLE tasks_v3 RENAME TO tasks")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_tasks_repo_id ON tasks(repo_id)")
+        conn.execute("CREATE TABLE IF NOT EXISTS schema_version (version INTEGER PRIMARY KEY)")
+        conn.execute("INSERT OR REPLACE INTO schema_version (version) VALUES (?)", (SCHEMA_VERSION,))
+        conn.execute("PRAGMA foreign_keys=ON")
+        conn.commit()
+
+
+def _init_and_migrate_sync(db_path: Path):
+    """Initialize base tables and run migration using a sync connection."""
+    conn = sqlite3.connect(str(db_path))
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA foreign_keys=ON")
+    conn.execute("PRAGMA busy_timeout=5000")
+    conn.executescript("""
+CREATE TABLE IF NOT EXISTS repos (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL UNIQUE,
+    github_url TEXT NOT NULL,
+    local_path TEXT NOT NULL,
+    default_branch TEXT DEFAULT 'main',
+    created_at TEXT DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS task_logs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    task_id INTEGER NOT NULL,
+    level TEXT DEFAULT 'info',
+    message TEXT NOT NULL,
+    created_at TEXT DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_task_logs_task_id ON task_logs(task_id);
+""")
+    conn.commit()
+    _migrate_sync(conn)
+    conn.close()
+
 
 class Database:
     """Async SQLite database wrapper with write serialization."""
@@ -59,13 +261,15 @@ class Database:
 
     async def connect(self):
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
+
+        # Run migration using a sync connection first (avoids threading issues)
+        _init_and_migrate_sync(self.db_path)
+
         self._db = await aiosqlite.connect(str(self.db_path))
         self._db.row_factory = aiosqlite.Row
         await self._db.execute("PRAGMA journal_mode=WAL")
         await self._db.execute("PRAGMA foreign_keys=ON")
         await self._db.execute("PRAGMA busy_timeout=5000")
-        await self._db.executescript(SCHEMA)
-        await self._db.commit()
 
     async def close(self):
         if self._db:
@@ -154,6 +358,51 @@ class Database:
                 await self.db.commit()
                 return cur.lastrowid
 
+    async def create_task_from_issue(
+        self, repo_id: int, prompt: str, model: str,
+        issue_number: int, issue_url: str,
+    ) -> int:
+        """Create a task linked to a GitHub issue."""
+        async with self._write_lock:
+            async with self.db.execute(
+                "INSERT INTO tasks (repo_id, prompt, model, github_issue_number, github_issue_url) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (repo_id, prompt, model, issue_number, issue_url),
+            ) as cur:
+                await self.db.commit()
+                return cur.lastrowid
+
+    async def get_task_by_issue(self, repo_id: int, issue_number: int) -> dict | None:
+        """Check if an issue already has an active task (dedup). Excludes cancelled/failed."""
+        async with self.db.execute(
+            "SELECT t.*, r.name as repo_name FROM tasks t "
+            "JOIN repos r ON t.repo_id = r.id "
+            "WHERE t.repo_id = ? AND t.github_issue_number = ? "
+            "AND t.status NOT IN ('cancelled', 'failed') "
+            "LIMIT 1",
+            (repo_id, issue_number),
+        ) as cur:
+            row = await cur.fetchone()
+            return dict(row) if row else None
+
+    async def list_pr_tasks(self) -> list[dict]:
+        """Tasks awaiting CI results (status=reviewed, after coordinator approval)."""
+        async with self.db.execute(
+            "SELECT t.*, r.name as repo_name, r.github_url FROM tasks t "
+            "JOIN repos r ON t.repo_id = r.id "
+            "WHERE t.status = 'reviewed'"
+        ) as cur:
+            return [dict(r) for r in await cur.fetchall()]
+
+    async def list_retrying_tasks(self) -> list[dict]:
+        """Tasks queued for CI retry (status=retrying)."""
+        async with self.db.execute(
+            "SELECT t.*, r.name as repo_name, r.github_url FROM tasks t "
+            "JOIN repos r ON t.repo_id = r.id "
+            "WHERE t.status = 'retrying'"
+        ) as cur:
+            return [dict(r) for r in await cur.fetchall()]
+
     async def claim_next_queued(self) -> dict | None:
         """Atomically claim the oldest queued task."""
         async with self._write_lock:
@@ -168,13 +417,24 @@ class Database:
                 await self.db.commit()
                 return dict(row) if row else None
 
+    async def list_pending_review(self) -> list[dict]:
+        """Tasks awaiting coordinator review (status=pr_created)."""
+        async with self.db.execute(
+            "SELECT t.*, r.name as repo_name, r.github_url FROM tasks t "
+            "JOIN repos r ON t.repo_id = r.id "
+            "WHERE t.status = 'pr_created'"
+        ) as cur:
+            return [dict(r) for r in await cur.fetchall()]
+
     async def update_task(self, task_id: int, **fields):
         if not fields:
             return
         allowed = {
             "status", "branch_name", "worktree_path", "pr_url",
             "agent_pid", "exit_code", "error_message", "output_summary",
+            "review_summary",
             "started_at", "completed_at",
+            "pr_number", "github_issue_number", "github_issue_url", "retry_count",
         }
         fields = {k: v for k, v in fields.items() if k in allowed}
         if not fields:
@@ -236,8 +496,30 @@ class SyncDatabase:
         self._db.execute("PRAGMA journal_mode=WAL")
         self._db.execute("PRAGMA foreign_keys=ON")
         self._db.execute("PRAGMA busy_timeout=5000")
-        self._db.executescript(SCHEMA)
+
+        # Ensure base tables exist before migration
+        self._db.executescript("""
+CREATE TABLE IF NOT EXISTS repos (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL UNIQUE,
+    github_url TEXT NOT NULL,
+    local_path TEXT NOT NULL,
+    default_branch TEXT DEFAULT 'main',
+    created_at TEXT DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS task_logs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    task_id INTEGER NOT NULL,
+    level TEXT DEFAULT 'info',
+    message TEXT NOT NULL,
+    created_at TEXT DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_task_logs_task_id ON task_logs(task_id);
+""")
         self._db.commit()
+        _migrate_sync(self._db)
 
     def close(self):
         if self._db:
@@ -330,7 +612,9 @@ class SyncDatabase:
         allowed = {
             "status", "branch_name", "worktree_path", "pr_url",
             "agent_pid", "exit_code", "error_message", "output_summary",
+            "review_summary",
             "started_at", "completed_at",
+            "pr_number", "github_issue_number", "github_issue_url", "retry_count",
         }
         fields = {k: v for k, v in fields.items() if k in allowed}
         if not fields:

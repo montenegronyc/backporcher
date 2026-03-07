@@ -12,6 +12,11 @@ from urllib.parse import urlparse
 
 from .config import Config
 from .db import Database
+from .github import (
+    close_pr, comment_on_issue, extract_pr_number_from_url,
+    get_ci_failure_logs, get_pr_diff, list_open_prs,
+    repo_full_name_from_url, update_issue_labels,
+)
 
 log = logging.getLogger("voltron.dispatcher")
 
@@ -56,7 +61,10 @@ def repo_name_from_url(url: str) -> str:
 def make_branch_name(task_id: int, prompt: str) -> str:
     """Generate a safe branch name from task ID and prompt."""
     slug = re.sub(r"[^a-z0-9]+", "-", prompt.lower().strip())[:40].strip("-")
-    branch = f"voltron/{task_id}-{slug}"
+    if slug:
+        branch = f"voltron/{task_id}-{slug}"
+    else:
+        branch = f"voltron/{task_id}"
     if not BRANCH_RE.match(branch):
         branch = f"voltron/{task_id}"
     return branch
@@ -167,18 +175,32 @@ async def run_agent(
         prompt,
     ]
 
-    log.info("Starting agent for task %d (model=%s)", task["id"], model)
-    await db.add_log(task["id"], f"Starting agent with model={model}")
+    # Sandbox: wrap with sudo -u + prlimit when agent_user is configured
+    if config.agent_user:
+        cmd = [
+            "sudo", "-u", config.agent_user, "--",
+            "prlimit",
+            "--nproc=100",        # max 100 processes
+            "--fsize=2147483648",  # 2 GB max file size
+            "--",
+            *cmd,
+        ]
+        agent_env = None  # Let sudo reset env to target user's defaults
+    else:
+        # Clean env: unset CLAUDECODE to avoid nested-session detection
+        agent_env = {k: v for k, v in os.environ.items() if k != "CLAUDECODE"}
 
-    # Clean env: unset CLAUDECODE to avoid nested-session detection
-    agent_env = {k: v for k, v in os.environ.items() if k != "CLAUDECODE"}
+    log.info("Starting agent for task %d (model=%s, user=%s)",
+             task["id"], model, config.agent_user or "self")
+    await db.add_log(task["id"], f"Starting agent with model={model}")
 
     proc = await asyncio.create_subprocess_exec(
         *cmd,
         cwd=str(worktree_path),
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
-        env=agent_env,
+        start_new_session=True,
+        **({"env": agent_env} if agent_env is not None else {}),
     )
 
     await db.update_task(task["id"], agent_pid=proc.pid)
@@ -245,12 +267,15 @@ async def run_agent(
             level="error",
         )
         try:
-            proc.send_signal(signal.SIGTERM)
+            os.killpg(proc.pid, signal.SIGTERM)
             await asyncio.sleep(5)
             if proc.returncode is None:
+                os.killpg(proc.pid, signal.SIGKILL)
+        except (ProcessLookupError, PermissionError):
+            try:
                 proc.kill()
-        except ProcessLookupError:
-            pass
+            except ProcessLookupError:
+                pass
         await proc.wait()
 
     if not output_summary and last_content:
@@ -299,11 +324,13 @@ async def create_pr(
         raise RuntimeError(f"git push failed: {err}")
 
     pr_title = f"[voltron] {task['prompt'][:60]}"
+    issue_num = task.get("github_issue_number")
+    closes_line = f"\n\nCloses #{issue_num}" if issue_num else ""
     pr_body = (
         f"## Voltron Task #{task['id']}\n\n"
         f"**Prompt:** {task['prompt'][:500]}\n\n"
         f"**Model:** {task['model']}\n\n"
-        f"---\n_Created by Voltron dispatcher_"
+        f"---\n_Created by Voltron dispatcher_{closes_line}"
     )
     rc, out, err = await run_cmd(
         "gh", "pr", "create",
@@ -318,8 +345,140 @@ async def create_pr(
         return None
 
     pr_url = out.strip()
+    pr_number = extract_pr_number_from_url(pr_url)
+    if pr_number:
+        await db.update_task(task["id"], pr_number=pr_number)
     log.info("Created PR: %s", pr_url)
     return pr_url
+
+
+REVIEW_PROMPT_TEMPLATE = """\
+You are a code review coordinator. Your job is to review a PR created by an automated agent.
+
+## Original Task
+{task_prompt}
+
+## PR Diff
+{pr_diff}
+
+## Other Open Voltron PRs (same repo)
+{other_prs}
+
+## Review Criteria
+1. Does the diff actually address the task?
+2. Are there obvious bugs, regressions, or security issues?
+3. Does it conflict with any of the other open PRs listed above?
+4. Is the scope appropriate (not too broad, not touching unrelated files)?
+
+## Your Response
+Analyze the PR, then end with exactly one of:
+VERDICT: APPROVE
+VERDICT: REJECT — {{one-line reason}}
+"""
+
+
+async def run_review(
+    task: dict, config: Config, db: Database,
+) -> tuple[str, str]:
+    """Run coordinator review on a PR. Returns (verdict, summary).
+
+    verdict: 'approve' | 'reject'
+    summary: explanation text
+    """
+    repo = await db.get_repo(task["repo_id"])
+    if not repo:
+        raise ValueError(f"Repo {task['repo_id']} not found")
+
+    pr_number = task.get("pr_number")
+    if not pr_number:
+        return "reject", "No PR number found on task"
+
+    repo_full = repo_full_name_from_url(repo["github_url"])
+
+    # Gather context in parallel
+    diff_coro = get_pr_diff(repo_full, pr_number)
+    prs_coro = list_open_prs(repo_full)
+    pr_diff, open_prs = await asyncio.gather(diff_coro, prs_coro)
+
+    if not pr_diff:
+        return "reject", "Could not retrieve PR diff"
+
+    # Format other open PRs (exclude this one)
+    other_prs_lines = []
+    for pr in open_prs:
+        if pr["number"] == pr_number:
+            continue
+        files = ", ".join(pr["changed_files"][:10]) or "(unknown)"
+        other_prs_lines.append(f"- PR #{pr['number']}: {pr['title']} [files: {files}]")
+    other_prs_text = "\n".join(other_prs_lines) if other_prs_lines else "(none)"
+
+    # Build the review prompt
+    review_prompt = REVIEW_PROMPT_TEMPLATE.format(
+        task_prompt=task["prompt"][:2000],
+        pr_diff=pr_diff,
+        other_prs=other_prs_text,
+    )
+
+    # Run claude -p for the review
+    worktree_path = task.get("worktree_path")
+    cwd = worktree_path if worktree_path and Path(worktree_path).exists() else repo["local_path"]
+
+    cmd = [
+        "claude", "-p",
+        "--output-format", "text",
+        "--model", config.coordinator_model,
+        review_prompt,
+    ]
+
+    if config.agent_user:
+        cmd = [
+            "sudo", "-u", config.agent_user, "--",
+            "prlimit", "--nproc=100", "--fsize=2147483648", "--",
+            *cmd,
+        ]
+        agent_env = None
+    else:
+        agent_env = {k: v for k, v in os.environ.items() if k != "CLAUDECODE"}
+
+    log.info("Running coordinator review for task %d (PR #%d)", task["id"], pr_number)
+
+    proc = await asyncio.create_subprocess_exec(
+        *cmd,
+        cwd=str(cwd),
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+        start_new_session=True,
+        **({"env": agent_env} if agent_env is not None else {}),
+    )
+
+    try:
+        stdout, stderr = await asyncio.wait_for(
+            proc.communicate(), timeout=300,
+        )
+    except asyncio.TimeoutError:
+        proc.kill()
+        await proc.wait()
+        return "reject", "Review timed out after 300s"
+
+    output = stdout.decode(errors="replace")
+    if proc.returncode != 0:
+        err_text = stderr.decode(errors="replace")
+        log.error("Review agent failed for task %d: %s", task["id"], err_text[:500])
+        return "reject", f"Review agent exited with code {proc.returncode}: {err_text[:500]}"
+
+    # Parse verdict — strip markdown bold/italic markers before matching
+    verdict = "reject"
+    for line in reversed(output.strip().splitlines()):
+        cleaned = line.strip().strip("*_").strip().upper()
+        if cleaned.startswith("VERDICT: APPROVE"):
+            verdict = "approve"
+            break
+        elif cleaned.startswith("VERDICT: REJECT"):
+            verdict = "reject"
+            break
+
+    summary = output[-4000:] if len(output) > 4000 else output
+    return verdict, summary
 
 
 async def cleanup_worktree(repo_path: Path, task_id: int) -> bool:
@@ -332,6 +491,75 @@ async def cleanup_worktree(repo_path: Path, task_id: int) -> bool:
         str(worktree_path), cwd=repo_path,
     )
     return rc == 0
+
+
+async def ensure_repo_permissions(repo_path: Path, config: Config):
+    """Set core.sharedRepository=group if agent_user is configured."""
+    if not config.agent_user:
+        return
+    rc, out, _ = await run_cmd("git", "config", "core.sharedRepository", cwd=repo_path)
+    if out.strip() not in ("group", "1"):
+        await run_cmd("git", "config", "core.sharedRepository", "group", cwd=repo_path)
+
+
+async def retry_with_ci_context(
+    task: dict, ci_logs: str, config: Config, db: Database,
+):
+    """Re-run the agent with CI failure context on the existing branch."""
+    task_id = task["id"]
+    repo = await db.get_repo(task["repo_id"])
+    if not repo:
+        raise ValueError(f"Repo {task['repo_id']} not found")
+
+    worktree_path = Path(task["worktree_path"])
+    if not worktree_path.exists():
+        raise RuntimeError(f"Worktree missing for task {task_id}: {worktree_path}")
+
+    # Pull latest on the branch
+    repo_lock = _get_repo_lock(repo["id"])
+    async with repo_lock:
+        rc, _, err = await run_cmd("git", "pull", "--rebase", cwd=worktree_path)
+        if rc != 0:
+            log.warning("git pull failed for retry task %d: %s", task_id, err)
+
+    # Build augmented prompt
+    augmented_prompt = (
+        f"{task['prompt']}\n\n"
+        f"---\n"
+        f"IMPORTANT: The previous attempt created a PR but CI checks failed. "
+        f"Please fix the issues shown in the CI logs below and commit the fixes.\n\n"
+        f"CI FAILURE LOGS:\n```\n{ci_logs}\n```"
+    )
+
+    # Temporarily patch the task's prompt for the agent run
+    patched_task = dict(task)
+    patched_task["prompt"] = augmented_prompt
+
+    await db.add_log(task_id, f"Retry #{task['retry_count']}: running agent with CI context")
+    exit_code, summary = await run_agent(patched_task, worktree_path, config, db)
+
+    if exit_code != 0:
+        now = datetime.now(timezone.utc).isoformat()
+        await db.update_task(
+            task_id, status="failed",
+            error_message=f"Retry agent exited with code {exit_code}",
+            completed_at=now,
+        )
+        return
+
+    # Push fixes (force-with-lease since we're updating the same branch)
+    branch = task["branch_name"]
+    rc, _, err = await run_cmd(
+        "git", "push", "--force-with-lease", "origin", branch,
+        cwd=worktree_path, timeout=120,
+    )
+    if rc != 0:
+        await db.add_log(task_id, f"Force push failed on retry: {err}", level="error")
+        raise RuntimeError(f"git push failed on retry: {err}")
+
+    # Back to pr_created — CI monitor will check again
+    await db.update_task(task_id, status="pr_created")
+    await db.add_log(task_id, f"Retry #{task['retry_count']}: pushed fixes, awaiting CI")
 
 
 async def dispatch_task(task: dict, config: Config, db: Database):
@@ -347,6 +575,7 @@ async def dispatch_task(task: dict, config: Config, db: Database):
         async with repo_lock:
             await db.add_log(task_id, "Fetching repository...")
             repo_path = await clone_or_fetch(repo, config)
+            await ensure_repo_permissions(repo_path, config)
 
             branch = make_branch_name(task_id, task["prompt"])
             await db.update_task(task_id, branch_name=branch)
@@ -388,6 +617,15 @@ async def dispatch_task(task: dict, config: Config, db: Database):
                 task_id, status="pr_created", pr_url=pr_url, completed_at=now,
             )
             await db.add_log(task_id, f"PR created: {pr_url}")
+
+            # Comment on the GitHub issue if this task came from one
+            issue_num = task.get("github_issue_number")
+            if issue_num:
+                repo_full = repo_full_name_from_url(repo["github_url"])
+                await comment_on_issue(
+                    repo_full, issue_num,
+                    f"PR created: {pr_url}\n\nAwaiting CI checks.",
+                )
         else:
             await db.update_task(
                 task_id, status="completed", completed_at=now,
