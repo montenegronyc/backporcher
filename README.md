@@ -5,11 +5,12 @@ Parallel Claude Code agent dispatcher. Turn GitHub Issues into PRs automatically
 ## How it works
 
 1. Create a GitHub issue and add the `voltron` label
-2. Voltron picks it up, runs a sandboxed Claude agent in a git worktree
-3. Agent makes changes, Voltron creates a PR
-4. A coordinator agent reviews the diff for bugs, conflicts, and scope
-5. CI runs — failures auto-retry with error context (up to 3x)
-6. On success, PR is auto-merged (squash) and the issue is closed
+2. Haiku triages the issue complexity and picks the right model (sonnet or opus)
+3. Voltron runs a sandboxed Claude agent in a git worktree
+4. Agent makes changes, Voltron creates a PR
+5. A coordinator agent reviews the diff for bugs, conflicts, and scope
+6. CI runs — failures auto-retry with error context (up to 3x)
+7. On success, PR is auto-merged (squash) and the issue is closed
 
 ## Quick Start
 
@@ -45,7 +46,7 @@ Four concurrent async loops:
 
 | Loop | Interval | Job |
 |------|----------|-----|
-| Issue Poller | 30s | Scans GitHub for `voltron`-labeled issues |
+| Issue Poller | 30s | Scans GitHub for `voltron`-labeled issues, triages complexity |
 | Task Executor | 5s | Runs Claude agents in sandboxed worktrees |
 | Coordinator | 15s | Reviews PRs for quality, conflicts, scope |
 | CI Monitor | 60s | Watches CI, auto-retries, auto-merges |

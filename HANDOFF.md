@@ -16,7 +16,7 @@ Voltron is a parallel Claude Code agent dispatcher. Create a GitHub issue, add t
 
 The worker daemon runs 4 async loops via `asyncio.gather()`:
 
-1. **Issue Poller** (every 30s) — scans GitHub for issues labeled `voltron`, deduplicates, creates tasks, claims issues
+1. **Issue Poller** (every 30s) — scans GitHub for issues labeled `voltron`, deduplicates, runs haiku triage to classify complexity (sonnet vs opus), creates tasks, claims issues
 2. **Task Executor** (every 5s) — claims queued tasks, syncs credentials, runs `claude -p` in sandboxed worktrees, runs build verification, creates PRs. Auto-retries transient failures
 3. **Coordinator Reviewer** (every 15s) — reviews PR diffs via `claude -p`, approves or rejects with explanation
 4. **CI Monitor** (every 60s) — checks PR CI status on approved PRs, auto-merges passing PRs, auto-retries failures (up to 3x), closes issues on success
@@ -29,7 +29,7 @@ The worker daemon runs 4 async loops via `asyncio.gather()`:
 | `voltron-in-progress` | Agent working on it | Daemon |
 | `voltron-done` | CI passed, PR merged, issue closed | Daemon |
 | `voltron-failed` | Max retries exhausted or rejected | Daemon |
-| `opus` | Use opus model (optional) | User |
+| `opus` | Force opus model (skips triage) | User |
 
 ## Task Status Flow
 

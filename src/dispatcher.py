@@ -621,6 +621,93 @@ async def retry_with_ci_context(
     await db.add_log(task_id, f"Retry #{task['retry_count']}: pushed fixes, awaiting CI")
 
 
+TRIAGE_PROMPT_TEMPLATE = """\
+You are a task complexity classifier for a code agent system. Given a GitHub issue, decide which AI model should work on it.
+
+## Models Available
+- **sonnet**: Fast, cheap. Good for: bug fixes, single-file changes, config tweaks, adding a flag/parameter, documentation, straightforward implementations with clear instructions.
+- **opus**: Slower, expensive, but much more capable. Required for: multi-file refactors, architectural changes, new subsystems, state management rewrites, complex feature implementations requiring design decisions, anything involving "extract", "redesign", "rewrite", or decomposition of large files.
+
+## Issue
+**Title:** {title}
+**Body:**
+{body}
+
+## Instructions
+Analyze the issue scope and complexity. Consider:
+1. How many files will likely need changes?
+2. Does it require architectural decisions or just following instructions?
+3. Is it a patch/fix or a structural change?
+4. How much code will likely be written (< 100 lines = sonnet, > 300 lines = opus)?
+
+Respond with exactly one line in this format:
+MODEL: sonnet — {{reason}}
+or
+MODEL: opus — {{reason}}
+"""
+
+
+async def triage_issue(title: str, body: str, config: Config) -> tuple[str, str]:
+    """Run haiku to classify issue complexity. Returns (model, reason)."""
+    prompt = TRIAGE_PROMPT_TEMPLATE.format(
+        title=title,
+        body=(body or "(no body)")[:3000],
+    )
+
+    cmd = ["claude", "-p", "--output-format", "text", "--model", "haiku", prompt]
+
+    if config.agent_user:
+        cmd = [
+            "sudo", "-u", config.agent_user, "--",
+            "prlimit", "--nproc=100", "--fsize=2147483648", "--",
+            *cmd,
+        ]
+        agent_env = None
+    else:
+        _sensitive_vars = {
+            "CLAUDECODE", "SSH_AUTH_SOCK", "SSH_AGENT_PID",
+            "GIT_ASKPASS", "GIT_CREDENTIALS", "GITHUB_TOKEN",
+            "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN",
+            "ANTHROPIC_API_KEY", "OPENAI_API_KEY",
+        }
+        agent_env = {k: v for k, v in os.environ.items() if k not in _sensitive_vars}
+
+    proc = await asyncio.create_subprocess_exec(
+        *cmd,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+        start_new_session=True,
+        **({"env": agent_env} if agent_env is not None else {}),
+    )
+
+    try:
+        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=60)
+    except asyncio.TimeoutError:
+        proc.kill()
+        await proc.wait()
+        log.warning("Triage timed out, defaulting to %s", config.default_model)
+        return config.default_model, "triage timed out"
+
+    output = stdout.decode(errors="replace").strip()
+    if proc.returncode != 0:
+        log.warning("Triage failed (exit %d), defaulting to %s", proc.returncode, config.default_model)
+        return config.default_model, f"triage failed (exit {proc.returncode})"
+
+    # Parse "MODEL: opus — reason" or "MODEL: sonnet — reason"
+    for line in output.strip().splitlines():
+        cleaned = line.strip().strip("*_").strip()
+        upper = cleaned.upper()
+        if upper.startswith("MODEL: OPUS"):
+            reason = cleaned.split("—", 1)[-1].strip() if "—" in cleaned else cleaned.split("-", 1)[-1].strip() if "- " in cleaned else "classified as complex"
+            return "opus", reason
+        elif upper.startswith("MODEL: SONNET"):
+            reason = cleaned.split("—", 1)[-1].strip() if "—" in cleaned else cleaned.split("-", 1)[-1].strip() if "- " in cleaned else "classified as straightforward"
+            return "sonnet", reason
+
+    log.warning("Could not parse triage output, defaulting to %s: %s", config.default_model, output[:200])
+    return config.default_model, f"unparseable triage output"
+
+
 async def sync_agent_credentials(config: Config):
     """Copy admin's Claude credentials to agent user if they're newer."""
     if not config.agent_user:

@@ -7,7 +7,7 @@ import signal
 
 from .config import Config, load_config
 from .db import Database
-from .dispatcher import dispatch_task, retry_with_ci_context, run_review, sync_agent_credentials
+from .dispatcher import dispatch_task, retry_with_ci_context, run_review, sync_agent_credentials, triage_issue
 from .github import (
     close_issue, close_pr, comment_on_issue, comment_on_pr,
     extract_pr_number_from_url, find_new_issues,
@@ -68,15 +68,19 @@ class WorkerDaemon:
                         if existing:
                             continue
 
-                        # Determine model from labels
-                        model = self.config.default_model
-                        if "opus" in issue.labels:
-                            model = "opus"
-
                         # Build prompt from issue title + body
                         prompt = issue.title
                         if issue.body and issue.body.strip():
                             prompt = f"{issue.title}\n\n{issue.body}"
+
+                        # Determine model: opus label = manual override, else triage
+                        if "opus" in issue.labels:
+                            model = "opus"
+                            triage_reason = "opus label (manual override)"
+                        else:
+                            model, triage_reason = await triage_issue(
+                                issue.title, issue.body, self.config,
+                            )
 
                         task_id = await self.db.create_task_from_issue(
                             repo["id"], prompt, model,
@@ -85,6 +89,10 @@ class WorkerDaemon:
                         await self.db.add_log(
                             task_id,
                             f"Created from issue #{issue.number}: {issue.title[:80]}",
+                        )
+                        await self.db.add_log(
+                            task_id,
+                            f"Triage: model={model} — {triage_reason[:200]}",
                         )
 
                         log.info(
