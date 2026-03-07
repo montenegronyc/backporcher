@@ -248,10 +248,18 @@ class WorkerDaemon:
                         pr_number = extract_pr_number_from_url(task["pr_url"])
                         if pr_number:
                             await self.db.update_task(task_id, pr_number=pr_number)
+                            task["pr_number"] = pr_number  # Update dict for run_review
                             log.info("Task #%d: backfilled pr_number=%d from URL", task_id, pr_number)
 
                     if not pr_number:
-                        continue
+                        # Re-fetch from DB in case it was set between list_pending_review and now
+                        fresh = await self.db.get_task(task_id)
+                        if fresh and fresh.get("pr_number"):
+                            pr_number = fresh["pr_number"]
+                            task["pr_number"] = pr_number
+                        else:
+                            log.warning("Task #%d: no pr_number, skipping review this cycle", task_id)
+                            continue
 
                     repo_full = repo_full_name_from_url(task["github_url"])
 
