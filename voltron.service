@@ -6,6 +6,7 @@ After=network.target
 Type=simple
 User=administrator
 Group=administrator
+SupplementaryGroups=voltron
 WorkingDirectory=/home/administrator/voltron
 ExecStart=/home/administrator/voltron/.venv/bin/voltron worker
 Restart=on-failure
@@ -14,14 +15,21 @@ RestartSec=10
 # Environment
 Environment=VOLTRON_BASE_DIR=/home/administrator/voltron
 Environment=VOLTRON_MAX_CONCURRENCY=2
+Environment=VOLTRON_AGENT_USER=voltron-agent
+Environment=VOLTRON_POLL_INTERVAL=30
+Environment=VOLTRON_GITHUB_OWNER=montenegronyc
+Environment=VOLTRON_CI_CHECK_INTERVAL=60
+Environment=VOLTRON_MAX_CI_RETRIES=3
+Environment=VOLTRON_ALLOWED_USERS=montenegronyc
 
 # Security hardening
-NoNewPrivileges=yes
-ProtectSystem=strict
+# NoNewPrivileges omitted — sudo -u needs setuid
+ProtectSystem=full
 ProtectHome=no
 ReadWritePaths=/home/administrator/voltron/data
 ReadWritePaths=/home/administrator/voltron/repos
 ReadWritePaths=/home/administrator/voltron/logs
+ReadWritePaths=/home/voltron-agent
 
 # Logging
 StandardOutput=journal
