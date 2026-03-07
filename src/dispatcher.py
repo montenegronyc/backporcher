@@ -135,8 +135,15 @@ async def setup_worktree(
             str(worktree_path), cwd=repo_path,
         )
 
+    # Prune stale worktree refs so branch -D can succeed
+    await run_cmd("git", "worktree", "prune", cwd=repo_path)
+
     # Delete stale branch from a previous attempt (makes re-queue idempotent)
-    await run_cmd("git", "branch", "-D", branch_name, cwd=repo_path)
+    rc, _, berr = await run_cmd("git", "branch", "-D", branch_name, cwd=repo_path)
+    if rc == 0:
+        log.info("Deleted stale branch %s", branch_name)
+    elif "not found" not in berr.lower():
+        log.warning("Branch cleanup for %s: %s", branch_name, berr.strip())
 
     worktree_path.parent.mkdir(parents=True, exist_ok=True)
 
