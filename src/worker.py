@@ -318,6 +318,11 @@ class WorkerDaemon:
                         await close_pr(repo_full, pr_number, comment=reject_comment)
                         await self.db.update_task(task_id, status="failed", error_message=f"Coordinator rejected: {summary[:500]}")
 
+                        # Cascade failure to dependent tasks
+                        cascaded = await self.db.handle_dependency_failure(task_id)
+                        if cascaded:
+                            log.info("Task #%d rejection cascaded to tasks: %s", task_id, cascaded)
+
                         # Update issue labels
                         issue_num = task.get("github_issue_number")
                         if issue_num:
