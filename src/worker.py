@@ -10,7 +10,7 @@ from .db import Database
 from .dispatcher import dispatch_task, retry_with_ci_context, run_review
 from .github import (
     close_pr, comment_on_issue, comment_on_pr, find_new_issues, claim_issue,
-    get_ci_failure_logs, get_pr_ci_status, repo_full_name_from_url,
+    get_ci_failure_logs, get_pr_ci_status, merge_pr, repo_full_name_from_url,
     update_issue_labels,
 )
 
@@ -239,11 +239,24 @@ class WorkerDaemon:
             await asyncio.sleep(self.config.ci_check_interval_seconds)
 
     async def _handle_ci_passed(self, task: dict, repo_full: str):
-        """CI passed — mark done, update labels, comment."""
+        """CI passed — auto-merge PR, mark completed, update labels."""
         task_id = task["id"]
+        pr_number = task.get("pr_number")
+
         await self.db.update_task(task_id, status="ci_passed")
         await self.db.add_log(task_id, "CI checks passed")
         log.info("Task #%d: CI passed", task_id)
+
+        # Auto-merge the PR
+        if pr_number:
+            merged = await merge_pr(repo_full, pr_number)
+            if merged:
+                await self.db.update_task(task_id, status="completed")
+                await self.db.add_log(task_id, f"PR #{pr_number} merged (squash)")
+                log.info("Task #%d: PR #%d merged", task_id, pr_number)
+            else:
+                await self.db.add_log(task_id, f"Failed to merge PR #{pr_number}", level="warn")
+                log.warning("Task #%d: merge failed for PR #%d", task_id, pr_number)
 
         issue_num = task.get("github_issue_number")
         if issue_num:
@@ -254,7 +267,7 @@ class WorkerDaemon:
             )
             await comment_on_issue(
                 repo_full, issue_num,
-                "CI checks passed. PR is ready for review.",
+                "CI passed. PR has been merged.",
             )
 
     async def _handle_ci_failure(self, task: dict, repo_full: str, ci):

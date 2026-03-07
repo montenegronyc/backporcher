@@ -328,6 +328,24 @@ async def close_pr(
     return True
 
 
+async def merge_pr(
+    repo_full_name: str, pr_number: int, method: str = "squash",
+) -> bool:
+    """Merge a PR directly (coordinator auto-merge)."""
+    rc, _, err = await _run_gh(
+        "pr", "merge",
+        "--repo", repo_full_name,
+        str(pr_number),
+        f"--{method}",
+    )
+    if rc != 0:
+        log.error("Failed to merge PR #%d: %s", pr_number, err.strip())
+        return False
+
+    log.info("Merged PR #%d on %s (%s)", pr_number, repo_full_name, method)
+    return True
+
+
 async def list_open_prs(
     repo_full_name: str, label: str = "voltron-in-progress",
 ) -> list[dict]:
