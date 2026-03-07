@@ -30,11 +30,11 @@ echo "[2/9] Creating agent user '$AGENT_USER'..."
 useradd --system --gid "$SHARED_GROUP" --home-dir "$AGENT_HOME" \
   --create-home --shell /usr/sbin/nologin "$AGENT_USER" 2>/dev/null || true
 
-# 3. Path traversal: agent needs g+x on parent dirs to reach repos/logs
-#    Use group-only (NOT o+x) to prevent other users from traversing
+# 3. Path traversal: agent needs to traverse admin home to reach voltron dir
+#    o+x on home (traverse only, no read), voltron dir group-owned by voltron
 echo "[3/9] Setting directory traversal permissions..."
-chmod g+x "/home/$ADMIN_USER"
-chmod o-x "/home/$ADMIN_USER"
+chmod o+x "/home/$ADMIN_USER"
+chgrp "$SHARED_GROUP" "$VOLTRON_DIR"
 chmod g+x "$VOLTRON_DIR"
 chmod o-rwx "$VOLTRON_DIR"
 
