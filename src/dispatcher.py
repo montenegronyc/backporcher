@@ -187,8 +187,14 @@ async def run_agent(
         ]
         agent_env = None  # Let sudo reset env to target user's defaults
     else:
-        # Clean env: unset CLAUDECODE to avoid nested-session detection
-        agent_env = {k: v for k, v in os.environ.items() if k != "CLAUDECODE"}
+        # Clean env: strip sensitive vars and CLAUDECODE (nested-session detection)
+        _sensitive_vars = {
+            "CLAUDECODE", "SSH_AUTH_SOCK", "SSH_AGENT_PID",
+            "GIT_ASKPASS", "GIT_CREDENTIALS", "GITHUB_TOKEN",
+            "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN",
+            "ANTHROPIC_API_KEY", "OPENAI_API_KEY",
+        }
+        agent_env = {k: v for k, v in os.environ.items() if k not in _sensitive_vars}
 
     log.info("Starting agent for task %d (model=%s, user=%s)",
              task["id"], model, config.agent_user or "self")
@@ -207,10 +213,13 @@ async def run_agent(
 
     output_summary = None
     last_content: list[str] = []
+    content_size = 0
+    MAX_CONTENT_BYTES = 10 * 1024 * 1024  # 10 MB cap on in-memory output
 
     async def read_stream():
-        nonlocal output_summary
-        with open(log_file, "w") as lf:
+        nonlocal output_summary, content_size
+        fd = os.open(str(log_file), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o640)
+        with os.fdopen(fd, "w") as lf:
             async for raw_line in proc.stdout:
                 line = raw_line.decode(errors="replace").strip()
                 if not line:
@@ -231,7 +240,10 @@ async def run_agent(
                     msg = event["message"]
                     for block in (msg.get("content") or []):
                         if block.get("type") == "text":
-                            last_content.append(block["text"])
+                            text = block["text"]
+                            if content_size < MAX_CONTENT_BYTES:
+                                last_content.append(text)
+                                content_size += len(text)
 
                 elif etype == "result":
                     output_summary = event.get("result", "")
@@ -245,7 +257,10 @@ async def run_agent(
                 elif etype == "content_block_delta":
                     delta = event.get("delta", {})
                     if delta.get("type") == "text_delta":
-                        last_content.append(delta.get("text", ""))
+                        text = delta.get("text", "")
+                        if content_size < MAX_CONTENT_BYTES:
+                            last_content.append(text)
+                            content_size += len(text)
 
     async def read_stderr():
         async for raw_line in proc.stderr:
@@ -470,7 +485,13 @@ async def run_review(
         ]
         agent_env = None
     else:
-        agent_env = {k: v for k, v in os.environ.items() if k != "CLAUDECODE"}
+        _sensitive_vars = {
+            "CLAUDECODE", "SSH_AUTH_SOCK", "SSH_AGENT_PID",
+            "GIT_ASKPASS", "GIT_CREDENTIALS", "GITHUB_TOKEN",
+            "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN",
+            "ANTHROPIC_API_KEY", "OPENAI_API_KEY",
+        }
+        agent_env = {k: v for k, v in os.environ.items() if k not in _sensitive_vars}
 
     log.info("Running coordinator review for task %d (PR #%d)", task["id"], pr_number)
 

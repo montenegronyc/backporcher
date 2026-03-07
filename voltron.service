@@ -21,11 +21,23 @@ Environment=VOLTRON_GITHUB_OWNER=montenegronyc
 Environment=VOLTRON_CI_CHECK_INTERVAL=60
 Environment=VOLTRON_MAX_CI_RETRIES=3
 Environment=VOLTRON_ALLOWED_USERS=montenegronyc
+Environment=RUSTUP_HOME=/home/administrator/.rustup
+Environment=CARGO_HOME=/home/administrator/.cargo
+Environment=PATH=/home/administrator/.cargo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
 # Security hardening
-# NoNewPrivileges omitted — sudo -u needs setuid
+# NoNewPrivileges omitted — sudo -u voltron-agent needs setuid
 ProtectSystem=full
 ProtectHome=no
+PrivateTmp=yes
+PrivateDevices=yes
+PrivateIPC=yes
+ProtectKernelTunables=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectHostname=yes
+ProtectClock=yes
+RestrictNamespaces=yes
 ReadWritePaths=/home/administrator/voltron/data
 ReadWritePaths=/home/administrator/voltron/repos
 ReadWritePaths=/home/administrator/voltron/logs
