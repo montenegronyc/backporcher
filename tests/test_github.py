@@ -65,8 +65,8 @@ class TestGitHubIssue:
         issue = GitHubIssue(
             number=1, title="Fix bug", body="Details here",
             url="https://github.com/o/r/issues/1",
-            author="testuser", labels=["voltron"],
+            author="testuser", labels=["backporcher"],
         )
         assert issue.number == 1
         assert issue.author == "testuser"
-        assert "voltron" in issue.labels
+        assert "backporcher" in issue.labels

@@ -1,0 +1,66 @@
+# backporcher.service — Template systemd unit file
+# Copy to /etc/systemd/system/backporcher.service and edit paths for your setup.
+#
+# Replace YOUR_USER, YOUR_GROUP, and paths below to match your deployment:
+#   sudo cp backporcher.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now backporcher
+
+[Unit]
+Description=Backporcher Agent Dispatcher Worker
+After=network.target
+
+[Service]
+Type=simple
+User=YOUR_USER
+Group=YOUR_GROUP
+SupplementaryGroups=backporcher
+WorkingDirectory=/home/YOUR_USER/backporcher
+ExecStart=/home/YOUR_USER/backporcher/.venv/bin/backporcher worker
+Restart=on-failure
+RestartSec=10
+
+# Environment — edit these for your setup
+Environment=BACKPORCHER_BASE_DIR=/home/YOUR_USER/backporcher
+Environment=BACKPORCHER_MAX_CONCURRENCY=2
+Environment=BACKPORCHER_AGENT_USER=backporcher-agent
+Environment=BACKPORCHER_POLL_INTERVAL=30
+Environment=BACKPORCHER_GITHUB_OWNER=your-github-org
+Environment=BACKPORCHER_CI_CHECK_INTERVAL=60
+Environment=BACKPORCHER_MAX_CI_RETRIES=3
+Environment=BACKPORCHER_ALLOWED_USERS=your-github-username
+Environment=BACKPORCHER_APPROVAL_MODE=review-merge
+Environment=BACKPORCHER_DASHBOARD_PORT=8888
+## Set your dashboard password (required to enable dashboard)
+# Environment=BACKPORCHER_DASHBOARD_PASSWORD=changeme
+
+# Uncomment if your repo uses Rust toolchain
+# Environment=RUSTUP_HOME=/home/YOUR_USER/.rustup
+# Environment=CARGO_HOME=/home/YOUR_USER/.cargo
+# Environment=PATH=/home/YOUR_USER/.cargo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+# Security hardening
+# NoNewPrivileges omitted — sudo -u backporcher-agent needs setuid
+ProtectSystem=full
+ProtectHome=no
+PrivateTmp=yes
+PrivateDevices=yes
+PrivateIPC=yes
+ProtectKernelTunables=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectHostname=yes
+ProtectClock=yes
+RestrictNamespaces=yes
+ReadWritePaths=/home/YOUR_USER/backporcher/data
+ReadWritePaths=/home/YOUR_USER/backporcher/repos
+ReadWritePaths=/home/YOUR_USER/backporcher/logs
+ReadWritePaths=/home/backporcher-agent
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=backporcher
+
+[Install]
+WantedBy=multi-user.target

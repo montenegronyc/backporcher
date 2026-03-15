@@ -14,14 +14,14 @@ root_cause: >
   (no group write).
 fix: >
   Added chmod -R g+w after worktree creation in setup_worktree() so the
-  voltron-agent user can modify all files.
+  backporcher-agent user can modify all files.
 file: src/dispatcher.py
 ---
 
 ## Problem
 
 After `git worktree add`, all source files have `0644` permissions. The
-`voltron-agent` user is in the `voltron` group and can read them, but
+`backporcher-agent` user is in the `backporcher` group and can read them, but
 cannot write. The agent runs, identifies the fix, but can't save changes.
 
 ## Why core.sharedRepository=group isn't enough
@@ -43,5 +43,5 @@ await run_cmd("chmod", "-R", "g+w", str(worktree_path))
 If agents complete with no PR and output mentions "permission denied" or
 "not writable", this is the cause. Check with:
 ```bash
-ls -la ~/voltron/repos/<repo>/.worktrees/<task_id>/
+ls -la ~/backporcher/repos/<repo>/.worktrees/<task_id>/
 ```

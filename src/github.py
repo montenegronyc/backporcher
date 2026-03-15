@@ -6,7 +6,7 @@ import logging
 import re
 from dataclasses import dataclass
 
-log = logging.getLogger("voltron.github")
+log = logging.getLogger("backporcher.github")
 
 
 @dataclass
@@ -68,9 +68,9 @@ def extract_pr_number_from_url(pr_url: str) -> int | None:
 
 
 REQUIRED_LABELS = {
-    "voltron-in-progress": ("FBCA04", "Voltron agent working"),
-    "voltron-done": ("0075CA", "Voltron completed"),
-    "voltron-failed": ("D93F0B", "Voltron agent failed"),
+    "backporcher-in-progress": ("FBCA04", "Backporcher agent working"),
+    "backporcher-done": ("0075CA", "Backporcher completed"),
+    "backporcher-failed": ("D93F0B", "Backporcher agent failed"),
 }
 
 # Track which repos we've already ensured labels for (per-process)
@@ -78,7 +78,7 @@ _labels_ensured: set[str] = set()
 
 
 async def ensure_labels(repo_full_name: str) -> None:
-    """Create required Voltron labels if they don't exist on the repo."""
+    """Create required Backporcher labels if they don't exist on the repo."""
     if repo_full_name in _labels_ensured:
         return
 
@@ -116,11 +116,11 @@ async def ensure_labels(repo_full_name: str) -> None:
 async def find_new_issues(
     repo_full_name: str, allowed_users: set[str],
 ) -> list[GitHubIssue]:
-    """Find open issues labeled 'voltron' that aren't claimed yet."""
+    """Find open issues labeled 'backporcher' that aren't claimed yet."""
     rc, out, err = await _run_gh(
         "issue", "list",
         "--repo", repo_full_name,
-        "--label", "voltron",
+        "--label", "backporcher",
         "--state", "open",
         "--json", "number,title,body,url,labels,author",
         "--limit", "20",
@@ -141,7 +141,7 @@ async def find_new_issues(
         label_names = [lb.get("name", "") for lb in item.get("labels", [])]
 
         # Skip if already claimed
-        if "voltron-in-progress" in label_names:
+        if "backporcher-in-progress" in label_names:
             continue
 
         # Author allowlist check
@@ -162,11 +162,11 @@ async def find_new_issues(
 
 
 async def claim_issue(repo_full_name: str, number: int) -> bool:
-    """Add 'voltron-in-progress' label, remove 'voltron' label, assign self."""
+    """Add 'backporcher-in-progress' label, remove 'backporcher' label, assign self."""
     ok = await update_issue_labels(
         repo_full_name, number,
-        add=["voltron-in-progress"],
-        remove=["voltron"],
+        add=["backporcher-in-progress"],
+        remove=["backporcher"],
     )
     if not ok:
         return False
@@ -426,9 +426,9 @@ async def merge_pr(
 
 
 async def list_open_prs(
-    repo_full_name: str, label: str = "voltron-in-progress",
+    repo_full_name: str, label: str = "backporcher-in-progress",
 ) -> list[dict]:
-    """List open voltron PRs for conflict awareness."""
+    """List open backporcher PRs for conflict awareness."""
     rc, out, err = await _run_gh(
         "pr", "list",
         "--repo", repo_full_name,

@@ -44,7 +44,7 @@ if rc == 0:
 
 - Worktree setup is now fully idempotent — re-queuing a task always works regardless of previous state
 - The remote delete is non-fatal (branch may not exist remotely on first run)
-- Periodically clean up stale remote branches: `git branch -r | grep voltron/ | sed 's|origin/||' | xargs -I{} git push origin --delete {}`
+- Periodically clean up stale remote branches: `git branch -r | grep backporcher/ | sed 's|origin/||' | xargs -I{} git push origin --delete {}`
 
 # Related
 

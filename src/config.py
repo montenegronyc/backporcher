@@ -4,13 +4,13 @@ import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
-BASE_DIR = Path(os.environ.get("VOLTRON_BASE_DIR", str(Path.home() / "voltron")))
+BASE_DIR = Path(os.environ.get("BACKPORCHER_BASE_DIR", str(Path.home() / "backporcher")))
 
 
 @dataclass(frozen=True)
 class Config:
     base_dir: Path = field(default_factory=lambda: BASE_DIR)
-    db_path: Path = field(default_factory=lambda: BASE_DIR / "data" / "voltron.db")
+    db_path: Path = field(default_factory=lambda: BASE_DIR / "data" / "backporcher.db")
     repos_dir: Path = field(default_factory=lambda: BASE_DIR / "repos")
     logs_dir: Path = field(default_factory=lambda: BASE_DIR / "logs")
 
@@ -49,41 +49,41 @@ class Config:
 
 def load_config() -> Config:
     """Load config from environment variables."""
-    base_dir = Path(os.environ.get("VOLTRON_BASE_DIR", str(BASE_DIR)))
+    base_dir = Path(os.environ.get("BACKPORCHER_BASE_DIR", str(BASE_DIR)))
 
-    allowed_users_str = os.environ.get("VOLTRON_ALLOWED_USERS", "")
+    allowed_users_str = os.environ.get("BACKPORCHER_ALLOWED_USERS", "")
     allowed_users = tuple(u.strip() for u in allowed_users_str.split(",") if u.strip())
 
     return Config(
         base_dir=base_dir,
         db_path=Path(os.environ.get(
-            "VOLTRON_DB_PATH", str(base_dir / "data" / "voltron.db")
+            "BACKPORCHER_DB_PATH", str(base_dir / "data" / "backporcher.db")
         )),
         repos_dir=Path(os.environ.get(
-            "VOLTRON_REPOS_DIR", str(base_dir / "repos")
+            "BACKPORCHER_REPOS_DIR", str(base_dir / "repos")
         )),
         logs_dir=Path(os.environ.get(
-            "VOLTRON_LOG_DIR", str(base_dir / "logs")
+            "BACKPORCHER_LOG_DIR", str(base_dir / "logs")
         )),
-        max_workers=int(os.environ.get("VOLTRON_MAX_CONCURRENCY", "2")),
-        default_model=os.environ.get("VOLTRON_DEFAULT_MODEL", "sonnet"),
+        max_workers=int(os.environ.get("BACKPORCHER_MAX_CONCURRENCY", "2")),
+        default_model=os.environ.get("BACKPORCHER_DEFAULT_MODEL", "sonnet"),
         task_timeout_seconds=int(
-            os.environ.get("VOLTRON_TASK_TIMEOUT", "3600")
+            os.environ.get("BACKPORCHER_TASK_TIMEOUT", "3600")
         ),
         poll_interval_seconds=int(
-            os.environ.get("VOLTRON_POLL_INTERVAL", "30")
+            os.environ.get("BACKPORCHER_POLL_INTERVAL", "30")
         ),
-        agent_user=os.environ.get("VOLTRON_AGENT_USER") or None,
-        github_owner=os.environ.get("VOLTRON_GITHUB_OWNER", ""),
-        max_ci_retries=int(os.environ.get("VOLTRON_MAX_CI_RETRIES", "3")),
+        agent_user=os.environ.get("BACKPORCHER_AGENT_USER") or None,
+        github_owner=os.environ.get("BACKPORCHER_GITHUB_OWNER", ""),
+        max_ci_retries=int(os.environ.get("BACKPORCHER_MAX_CI_RETRIES", "3")),
         ci_check_interval_seconds=int(
-            os.environ.get("VOLTRON_CI_CHECK_INTERVAL", "60")
+            os.environ.get("BACKPORCHER_CI_CHECK_INTERVAL", "60")
         ),
         allowed_github_users=allowed_users,
-        coordinator_model=os.environ.get("VOLTRON_COORDINATOR_MODEL", "sonnet"),
-        max_verify_retries=int(os.environ.get("VOLTRON_MAX_VERIFY_RETRIES", "2")),
-        max_task_retries=int(os.environ.get("VOLTRON_MAX_TASK_RETRIES", "3")),
-        approval_mode=os.environ.get("VOLTRON_APPROVAL_MODE", "review-merge"),
-        dashboard_port=int(os.environ.get("VOLTRON_DASHBOARD_PORT", "8080")),
-        dashboard_password=os.environ.get("VOLTRON_DASHBOARD_PASSWORD") or None,
+        coordinator_model=os.environ.get("BACKPORCHER_COORDINATOR_MODEL", "sonnet"),
+        max_verify_retries=int(os.environ.get("BACKPORCHER_MAX_VERIFY_RETRIES", "2")),
+        max_task_retries=int(os.environ.get("BACKPORCHER_MAX_TASK_RETRIES", "3")),
+        approval_mode=os.environ.get("BACKPORCHER_APPROVAL_MODE", "review-merge"),
+        dashboard_port=int(os.environ.get("BACKPORCHER_DASHBOARD_PORT", "8080")),
+        dashboard_password=os.environ.get("BACKPORCHER_DASHBOARD_PASSWORD") or None,
     )

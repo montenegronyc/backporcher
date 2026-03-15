@@ -50,7 +50,7 @@ class TestRepoNameFromUrl:
 class TestMakeBranchName:
     def test_basic(self):
         branch = make_branch_name(1, "Add a health check")
-        assert branch.startswith("voltron/1-")
+        assert branch.startswith("backporcher/1-")
         assert "health" in branch
 
     def test_sanitizes_special_chars(self):
@@ -60,8 +60,8 @@ class TestMakeBranchName:
 
     def test_truncates_long_prompt(self):
         branch = make_branch_name(3, "a" * 200)
-        assert len(branch) <= 110  # voltron/3- prefix + 40 chars max
+        assert len(branch) <= 110  # backporcher/3- prefix + 40 chars max
 
     def test_fallback_for_invalid(self):
         branch = make_branch_name(4, "!@#$%^")
-        assert branch == "voltron/4"
+        assert branch == "backporcher/4"

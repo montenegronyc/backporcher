@@ -1,5 +1,5 @@
 [project]
-name = "voltron"
+name = "backporcher"
 version = "0.2.0"
 description = "Parallel Claude Code agent dispatcher — CLI + worker daemon"
 requires-python = ">=3.11"
@@ -12,4 +12,4 @@ dependencies = [
 include = ["src*"]
 
 [project.scripts]
-voltron = "src.cli:main"
+backporcher = "src.cli:main"

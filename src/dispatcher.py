@@ -19,13 +19,13 @@ from .github import (
     repo_full_name_from_url, update_issue_labels,
 )
 
-log = logging.getLogger("voltron.dispatcher")
+log = logging.getLogger("backporcher.dispatcher")
 
 
 async def _mark_issue_failed(task: dict, db: Database, reason: str):
     """Update GitHub labels on the source issue when a task permanently fails.
 
-    Moves from voltron-in-progress → voltron-failed and posts a comment.
+    Moves from backporcher-in-progress → backporcher-failed and posts a comment.
     No-op if the task didn't originate from a GitHub issue.
     """
     issue_num = task.get("github_issue_number")
@@ -37,12 +37,12 @@ async def _mark_issue_failed(task: dict, db: Database, reason: str):
     repo_full = repo_full_name_from_url(repo["github_url"])
     await update_issue_labels(
         repo_full, issue_num,
-        add=["voltron-failed"],
-        remove=["voltron-in-progress"],
+        add=["backporcher-failed"],
+        remove=["backporcher-in-progress"],
     )
     await comment_on_issue(
         repo_full, issue_num,
-        f"{reason}\n\nRe-add the `voltron` label to retry.",
+        f"{reason}\n\nRe-add the `backporcher` label to retry.",
     )
 
 
@@ -88,11 +88,11 @@ def make_branch_name(task_id: int, prompt: str) -> str:
     """Generate a safe branch name from task ID and prompt."""
     slug = re.sub(r"[^a-z0-9]+", "-", prompt.lower().strip())[:40].strip("-")
     if slug:
-        branch = f"voltron/{task_id}-{slug}"
+        branch = f"backporcher/{task_id}-{slug}"
     else:
-        branch = f"voltron/{task_id}"
+        branch = f"backporcher/{task_id}"
     if not BRANCH_RE.match(branch):
-        branch = f"voltron/{task_id}"
+        branch = f"backporcher/{task_id}"
     return branch
 
 
@@ -193,8 +193,8 @@ async def setup_worktree(
         raise RuntimeError(f"git worktree add failed: {err}")
 
     # Configure git identity in the worktree
-    await run_cmd("git", "config", "user.name", "Voltron", cwd=worktree_path)
-    await run_cmd("git", "config", "user.email", "voltron@dispatch.local", cwd=worktree_path)
+    await run_cmd("git", "config", "user.name", "Backporcher", cwd=worktree_path)
+    await run_cmd("git", "config", "user.email", "backporcher@dispatch.local", cwd=worktree_path)
 
     # Ensure worktree files are group-writable so agent user can modify them.
     # core.sharedRepository=group only affects new git objects, not checked-out files.
@@ -424,7 +424,7 @@ async def create_pr(
             return None
         # Stage + commit uncommitted changes
         await run_cmd("git", "add", "-A", cwd=worktree_path)
-        commit_msg = f"voltron: {task['prompt'][:72]}\n\nTask #{task['id']}"
+        commit_msg = f"backporcher: {task['prompt'][:72]}\n\nTask #{task['id']}"
         rc3, _, err = await run_cmd("git", "commit", "-m", commit_msg, cwd=worktree_path)
         if rc3 != 0:
             await db.add_log(task["id"], f"git commit failed: {err}", level="error")
@@ -441,14 +441,14 @@ async def create_pr(
         await db.add_log(task["id"], f"git push failed: {err}", level="error")
         raise RuntimeError(f"git push failed: {err}")
 
-    pr_title = f"[voltron] {task['prompt'][:60]}"
+    pr_title = f"[backporcher] {task['prompt'][:60]}"
     issue_num = task.get("github_issue_number")
     closes_line = f"\n\nCloses #{issue_num}" if issue_num else ""
     pr_body = (
-        f"## Voltron Task #{task['id']}\n\n"
+        f"## Backporcher Task #{task['id']}\n\n"
         f"**Prompt:** {task['prompt'][:500]}\n\n"
         f"**Model:** {task['model']}\n\n"
-        f"---\n_Created by Voltron dispatcher_{closes_line}"
+        f"---\n_Created by Backporcher dispatcher_{closes_line}"
     )
     rc, out, err = await run_cmd(
         "gh", "pr", "create",
@@ -481,7 +481,7 @@ You are a code review coordinator. Your job is to review a PR created by an auto
 ## PR Diff
 {pr_diff}
 
-## Other Open Voltron PRs (same repo)
+## Other Open Backporcher PRs (same repo)
 {other_prs}
 
 ## Review Criteria
@@ -1006,7 +1006,7 @@ async def sync_agent_credentials(config: Config):
         log.info("Syncing Claude credentials to %s", config.agent_user)
         rc, _, err = await run_cmd(
             "sudo", "install", "-m", "600",
-            "-o", config.agent_user, "-g", "voltron",
+            "-o", config.agent_user, "-g", "backporcher",
             str(admin_cred), str(agent_cred),
         )
         if rc != 0:

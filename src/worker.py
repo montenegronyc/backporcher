@@ -16,7 +16,7 @@ from .github import (
     repo_full_name_from_url, update_issue_labels,
 )
 
-log = logging.getLogger("voltron.worker")
+log = logging.getLogger("backporcher.worker")
 
 # Task executor poll interval (separate from issue poller)
 EXECUTOR_POLL_SECONDS = 5
@@ -67,14 +67,14 @@ class WorkerDaemon:
             loops.append(start_dashboard(self.db, self.config))
             log.info("Dashboard enabled on port %d", self.config.dashboard_port)
         else:
-            log.info("Dashboard disabled (no VOLTRON_DASHBOARD_PASSWORD set)")
+            log.info("Dashboard disabled (no BACKPORCHER_DASHBOARD_PASSWORD set)")
 
         await asyncio.gather(*loops)
 
     # --- Loop 1: Issue Poller ---
 
     async def _issue_poller_loop(self):
-        """Poll GitHub for new issues labeled 'voltron'. Batches per repo for orchestration."""
+        """Poll GitHub for new issues labeled 'backporcher'. Batches per repo for orchestration."""
         allowed_users = set(self.config.allowed_github_users)
 
         while self._running:
@@ -446,7 +446,7 @@ class WorkerDaemon:
                             # Max retries exhausted — permanent failure
                             reject_comment = (
                                 f"**Coordinator Review: REJECTED**\n\n{summary[:1500]}\n\n"
-                                f"PR closed by Voltron coordinator (retries exhausted)."
+                                f"PR closed by Backporcher coordinator (retries exhausted)."
                             )
                             await close_pr(repo_full, pr_number, comment=reject_comment)
                             await self.db.update_task(
@@ -462,13 +462,13 @@ class WorkerDaemon:
                             if issue_num:
                                 await update_issue_labels(
                                     repo_full, issue_num,
-                                    add=["voltron-failed"],
-                                    remove=["voltron-in-progress"],
+                                    add=["backporcher-failed"],
+                                    remove=["backporcher-in-progress"],
                                 )
                                 await comment_on_issue(
                                     repo_full, issue_num,
                                     f"PR was rejected by coordinator review (retries exhausted):\n\n{summary[:500]}\n\n"
-                                    f"Re-add the `voltron` label to retry.",
+                                    f"Re-add the `backporcher` label to retry.",
                                 )
                             await cleanup_task_artifacts(task, self.db)
 
@@ -567,7 +567,7 @@ class WorkerDaemon:
         # Merge gate: in non-full-auto modes, hold for approval
         if self.config.approval_mode != "full-auto":
             await self.db.set_hold(task_id, "merge_approval")
-            await self.db.add_log(task_id, "Held for merge approval — run `voltron approve %d` or use dashboard" % task_id)
+            await self.db.add_log(task_id, "Held for merge approval — run `backporcher approve %d` or use dashboard" % task_id)
             log.info("Task #%d: held for merge approval", task_id)
             # Post PR comment
             if pr_number:
@@ -575,7 +575,7 @@ class WorkerDaemon:
                 await _comment_on_pr(
                     repo_full, pr_number,
                     f"CI passed. Awaiting merge approval.\n\n"
-                    f"Run `voltron approve {task_id}` or use the dashboard to merge.",
+                    f"Run `backporcher approve {task_id}` or use the dashboard to merge.",
                 )
             return
 
@@ -591,8 +591,8 @@ class WorkerDaemon:
                 if issue_num:
                     await update_issue_labels(
                         repo_full, issue_num,
-                        add=["voltron-done"],
-                        remove=["voltron-in-progress"],
+                        add=["backporcher-done"],
+                        remove=["backporcher-in-progress"],
                     )
                     await comment_on_issue(
                         repo_full, issue_num,
@@ -638,13 +638,13 @@ class WorkerDaemon:
                 if issue_num:
                     await update_issue_labels(
                         repo_full, issue_num,
-                        add=["voltron-failed"],
-                        remove=["voltron-in-progress"],
+                        add=["backporcher-failed"],
+                        remove=["backporcher-in-progress"],
                     )
                     await comment_on_issue(
                         repo_full, issue_num,
                         f"Merge failed for PR #{pr_number} (reason unknown, not a conflict).\n\n"
-                        f"Re-add the `voltron` label to retry.",
+                        f"Re-add the `backporcher` label to retry.",
                     )
                 await cleanup_task_artifacts(task, self.db)
 
@@ -666,8 +666,8 @@ class WorkerDaemon:
             if issue_num:
                 await update_issue_labels(
                     repo_full, issue_num,
-                    add=["voltron-done"],
-                    remove=["voltron-in-progress"],
+                    add=["backporcher-done"],
+                    remove=["backporcher-in-progress"],
                 )
                 await comment_on_issue(
                     repo_full, issue_num,
@@ -713,13 +713,13 @@ class WorkerDaemon:
             if issue_num:
                 await update_issue_labels(
                     repo_full, issue_num,
-                    add=["voltron-failed"],
-                    remove=["voltron-in-progress"],
+                    add=["backporcher-failed"],
+                    remove=["backporcher-in-progress"],
                 )
                 await comment_on_issue(
                     repo_full, issue_num,
                     f"Merge failed for PR #{pr_number} (reason unknown, not a conflict).\n\n"
-                    f"Re-add the `voltron` label to retry.",
+                    f"Re-add the `backporcher` label to retry.",
                 )
             await cleanup_task_artifacts(task, self.db)
 
@@ -761,14 +761,14 @@ class WorkerDaemon:
             if issue_num:
                 await update_issue_labels(
                     repo_full, issue_num,
-                    add=["voltron-failed"],
-                    remove=["voltron-in-progress"],
+                    add=["backporcher-failed"],
+                    remove=["backporcher-in-progress"],
                 )
                 await comment_on_issue(
                     repo_full, issue_num,
                     f"CI failed after {self.config.max_ci_retries} retries. "
                     f"Failed checks: {', '.join(ci.failed_checks[:5])}\n\n"
-                    f"Marking as failed. Re-add the `voltron` label to retry.",
+                    f"Marking as failed. Re-add the `backporcher` label to retry.",
                 )
             await cleanup_task_artifacts(task, self.db)
 

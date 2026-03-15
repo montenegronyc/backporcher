@@ -1,4 +1,4 @@
-"""Real-time web dashboard for Voltron — aiohttp + SSE, no frontend build step."""
+"""Real-time web dashboard for Backporcher — aiohttp + SSE, no frontend build step."""
 
 import asyncio
 import base64
@@ -12,7 +12,7 @@ from aiohttp import web
 from .config import Config
 from .db import Database
 
-log = logging.getLogger("voltron.dashboard")
+log = logging.getLogger("backporcher.dashboard")
 
 # Status badge mapping (matches CLI fleet command)
 BADGE = {
@@ -62,7 +62,7 @@ def auth_middleware(password: str | None):
         if password and not _check_auth(request, password):
             return web.Response(
                 status=401,
-                headers={"WWW-Authenticate": 'Basic realm="Voltron Dashboard"'},
+                headers={"WWW-Authenticate": 'Basic realm="Backporcher Dashboard"'},
                 text="Unauthorized",
             )
         return await handler(request)
@@ -200,7 +200,7 @@ DASHBOARD_HTML = """\
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Voltron Dashboard</title>
+<title>Backporcher Dashboard</title>
 <style>
   :root {
     --bg: #0d1117; --bg2: #161b22; --border: #30363d;
@@ -352,7 +352,7 @@ DASHBOARD_HTML = """\
 <body>
 
 <div class="header">
-  <span class="title">VOLTRON</span>
+  <span class="title">BACKPORCHER</span>
   <div class="stat active">
     <span class="value" id="cnt-active">-</span>
     <span class="label">Running</span>
@@ -407,7 +407,7 @@ DASHBOARD_HTML = """\
 
 <div class="footer">
   <span id="last-update">-</span>
-  <span>Voltron Agent Dispatcher</span>
+  <span>Backporcher Agent Dispatcher</span>
 </div>
 
 <script>

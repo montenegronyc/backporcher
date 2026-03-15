@@ -1,4 +1,4 @@
-"""CLI entry point: voltron {status,cancel,cleanup,fleet,repo,worker}."""
+"""CLI entry point: backporcher {status,cancel,cleanup,fleet,repo,worker}."""
 
 import argparse
 import os
@@ -47,7 +47,7 @@ def cmd_repo_list(args):
     db = get_db()
     repos = db.list_repos()
     if not repos:
-        print("No repos configured. Use: voltron repo add <url>")
+        print("No repos configured. Use: backporcher repo add <url>")
         return
     for r in repos:
         verify = f"  verify: {r['verify_command']}" if r.get("verify_command") else ""
@@ -80,7 +80,7 @@ def cmd_fleet(args):
     tasks = db.list_tasks(limit=50)
 
     if not tasks:
-        print("No tasks. Create a GitHub issue with label 'voltron' to dispatch work.")
+        print("No tasks. Create a GitHub issue with label 'backporcher' to dispatch work.")
         db.close()
         return
 
@@ -207,7 +207,7 @@ def cmd_status(args):
 
         tasks = db.list_tasks(limit=20)
         if not tasks:
-            print("No tasks. Create a GitHub issue with label 'voltron' to dispatch work.")
+            print("No tasks. Create a GitHub issue with label 'backporcher' to dispatch work.")
             return
 
         for t in tasks:
@@ -291,10 +291,10 @@ def cmd_cancel(args):
             repo_full = repo_full_name_from_url(repo["github_url"])
             subprocess.run(
                 ["gh", "issue", "edit", "--repo", repo_full, str(issue_num),
-                 "--add-label", "voltron", "--remove-label", "voltron-in-progress"],
+                 "--add-label", "backporcher", "--remove-label", "backporcher-in-progress"],
                 capture_output=True,
             )
-            print(f"  Restored 'voltron' label on issue #{issue_num}")
+            print(f"  Restored 'backporcher' label on issue #{issue_num}")
 
     db.close()
 
@@ -432,7 +432,7 @@ def cmd_hold(args):
 
     db.set_hold(task["id"], "user_hold")
     db.add_log(task["id"], "User hold set via CLI")
-    print(f"Held task #{task['id']}. Use 'voltron approve {task['id']}' to release.")
+    print(f"Held task #{task['id']}. Use 'backporcher approve {task['id']}' to release.")
     db.close()
 
 
@@ -445,7 +445,7 @@ def cmd_release(args):
 
     if task.get("hold") != "user_hold":
         print(f"Task #{args.task_id} does not have a user hold (hold={task.get('hold')})")
-        print(f"Use 'voltron approve {args.task_id}' to clear any hold type.")
+        print(f"Use 'backporcher approve {args.task_id}' to clear any hold type.")
         sys.exit(1)
 
     db.clear_hold(task["id"])
@@ -482,7 +482,7 @@ def cmd_worker(args):
 
 def main():
     parser = argparse.ArgumentParser(
-        prog="voltron",
+        prog="backporcher",
         description="Parallel Claude Code agent dispatcher — GitHub Issues as task queue",
     )
     sub = parser.add_subparsers(dest="command")
