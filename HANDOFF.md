@@ -1,128 +1,72 @@
-# Backporcher — GitHub Issues as Task Queue
+# Handoff — Rename voltron to backporcher (complete)
+Generated: 2026-03-15
 
-## Architecture
+## Goal
+Rename the project from "voltron" (Hasbro trademark) to "backporcher" before making the repo public. Mechanical find-and-replace across ~26 files, plus GitHub repo rename, label migration, and local infrastructure updates.
 
-```
-GitHub Issue (label: backporcher)
-  → Issue Poller → Batch Orchestrator (haiku, 2+ issues) → SQLite queue (priority + deps)
-    → Task Executor (respects deps) → credential sync → claude -p → build verify → git push + gh pr create
-      → Coordinator Review (claude -p reviews diff, checks conflicts)
-        → CI Monitor → auto-merge PR → close issue
-```
+## Current status
+**Done.** All 5 phases complete, committed, and pushed.
 
-Backporcher is a parallel Claude Code agent dispatcher. Create a GitHub issue, add the `backporcher` label, and the daemon picks it up — runs a sandboxed AI agent, verifies the build, creates a PR, reviews it, monitors CI, auto-merges on success, and closes the issue.
+- Phase 1 (source files): 7 files renamed
+- Phase 2 (config/infra): 2 files renamed, `voltron.service` renamed to `backporcher.service`
+- Phase 3 (tests): 4 files renamed
+- Phase 4 (documentation): CLAUDE.md, README.md, HANDOFF.md, 3 solution docs renamed
+- Phase 5 (GitHub + local): repo renamed, labels renamed on 5 repos, remote URL updated, directory moved to `~/backporcher`, database renamed, venv recreated, pip reinstalled
+- Verification: `grep -ri voltron` = zero hits, 66/66 tests pass, `backporcher fleet` works, GitHub repo accessible
 
-## Four Concurrent Loops
+## Key decisions made
+- **Longest-match-first replacement order** to avoid partial replacements (e.g., `voltron-in-progress` before `voltron`, `VOLTRON_` before `Voltron`)
+- **15 replacement patterns** applied in strict order per file
+- **Venv recreated** (not patched) because shebangs pointed to old `/home/administrator/voltron/.venv/bin/python3` path
+- **~/CLAUDE.md updated** too (references `voltron` in repo structure and Python style sections)
 
-The worker daemon runs 4 async loops via `asyncio.gather()`:
+## What worked
+- Parallel background agents for Phase 4 docs (4 agents, all completed successfully)
+- `replace_all=true` in Edit tool for bulk replacements per file
+- Post-phase grep verification caught a stray `VOLTRON` (all-caps) in dashboard.py HTML header that wasn't in the original pattern list
 
-1. **Issue Poller** (every 30s) — scans GitHub for issues labeled `backporcher`, deduplicates, batch-orchestrates 2+ issues per repo (haiku assigns priorities, dependencies, models), creates tasks with dependency chains, claims issues
-2. **Task Executor** (every 5s) — claims queued tasks, syncs credentials, runs `claude -p` in sandboxed worktrees, runs build verification, creates PRs. Auto-retries transient failures
-3. **Coordinator Reviewer** (every 15s) — reviews PR diffs via `claude -p`, approves or rejects with explanation
-4. **CI Monitor** (every 60s) — checks PR CI status on approved PRs, auto-merges passing PRs, auto-retries failures (up to 3x), closes issues on success
+## What didn't work
+- **pyproject.toml**: Edit tool requires reading the file in the current conversation context, not just in a sub-agent. Had to re-read and retry.
+- **Venv shebang breakage**: After `mv ~/voltron ~/backporcher`, all venv scripts had shebangs pointing to the old path. Fixed by recreating the venv with `python3 -m venv .venv --clear`.
 
-## Label Protocol
+## Files modified
+20 files changed (380 insertions, 380 deletions):
 
-| Label | Meaning | Set by |
-|-------|---------|--------|
-| `backporcher` | Ready for pickup | User |
-| `backporcher-in-progress` | Agent working on it | Daemon |
-| `backporcher-done` | CI passed, PR merged, issue closed | Daemon |
-| `backporcher-failed` | Max retries exhausted or rejected | Daemon |
-| `opus` | Force opus model (skips triage) | User |
+| File | Change |
+|------|--------|
+| `src/config.py` | `VOLTRON_*` env vars, `voltron.db` path |
+| `src/github.py` | Labels dict, logger name |
+| `src/dispatcher.py` | Labels, branch prefix, git identity, logger, group name |
+| `src/worker.py` | Labels, CLI refs in messages, logger |
+| `src/cli.py` | prog name, label refs, CLI output |
+| `src/dashboard.py` | Logger, HTML title/header/footer |
+| `pyproject.toml` | Package name, entry point |
+| `backporcher.service` | Renamed from `voltron.service`, all env vars and paths |
+| `scripts/setup-sandbox.sh` | User, group, git identity, directory paths |
+| `tests/test_config.py` | Env var names |
+| `tests/test_cli.py` | Helper function name |
+| `tests/test_dispatcher.py` | Branch prefix assertions |
+| `tests/test_github.py` | Label references |
+| `CLAUDE.md` | All references (~45+) |
+| `README.md` | All references (~30+) |
+| `HANDOFF.md` | All references (~20+) |
+| `docs/solutions/daemon-task-reset-race.md` | Agent user, db path, CLI commands |
+| `docs/solutions/worktree-permissions.md` | Agent user, group, paths |
+| `docs/solutions/stale-branch-cleanup.md` | Branch prefix in grep pattern |
 
-## Task Status Flow
+## Next steps
+1. **Deploy the service**: Copy `backporcher.service` to `/etc/systemd/system/`, update env vars, `daemon-reload`, restart
+2. **Re-run sandbox setup**: `sudo bash scripts/setup-sandbox.sh` (creates `backporcher-agent` user and `backporcher` group)
+3. **Verify the old `voltron-agent` user/group** can be removed (check no running processes)
+4. **Update any external references** (CI configs, monitoring, documentation outside this repo)
+5. **Make repo public** when ready
 
-```
-queued → working → pr_created → reviewing → reviewed → ci_passed → completed (merged)
-                                                     → retrying → pr_created (retry loop)
-                                                     → failed (max retries)
-                              → reviewing → failed (coordinator rejected)
-       → failed (agent error)
-       → completed (no changes)
-       → queued (auto-retry on transient failure)
-any    → cancelled (manual)
-```
-
-## Key Files
-
-| File | Purpose |
-|------|---------|
-| `src/github.py` | All `gh` CLI interactions (issues, labels, CI status, comments, merge, close) |
-| `src/db.py` | SQLite with schema migration (v1→v5), async + sync wrappers |
-| `src/config.py` | Env-var based config |
-| `src/dispatcher.py` | Worktree setup, credential sync, agent execution, build verify, PR creation, review runner |
-| `src/worker.py` | 4-loop daemon (issue poller, task executor, coordinator reviewer, CI monitor) |
-| `src/cli.py` | CLI: fleet, status, cancel, cleanup, repo (add/list/verify), worker |
-| `backporcher.service` | systemd unit with security hardening |
-| `scripts/setup-sandbox.sh` | One-time sandbox user setup |
-
-## Self-Healing
-
-- **Startup recovery** — `working` → `queued`, `reviewing` → `pr_created` on restart
-- **Credential auto-sync** — copies admin credentials to agent user when stale
-- **Idempotent branches** — deletes stale branches before worktree creation
-- **Transient auto-retry** — auth errors, EACCES, stale branches retry up to 2x
-- **PR number backfill** — extracts from URL if database field is NULL
-- **Preflight checks** — verifies agent access and credentials on startup
-- **Dependency failure cascade** — failed tasks cascade failure to all queued dependents
-
-## Security
-
-- **Agent sandbox** — `claude -p` runs as `backporcher-agent` via `sudo -u`, prlimit enforced
-- **`gh` CLI in worker only** — all GitHub API calls run as `administrator`
-- **Author allowlist** — `BACKPORCHER_ALLOWED_USERS` filters issue authors
-- **Env var filtering** — sensitive vars stripped from agent subprocess
-- **Output cap** — 10MB buffer limit on agent output
-- **systemd hardening** — PrivateTmp, PrivateDevices, ProtectSystem, etc.
-
-## Configuration (Environment Variables)
-
-| Variable | Default | Purpose |
-|----------|---------|---------|
-| `BACKPORCHER_POLL_INTERVAL` | 30 | Issue polling interval (seconds) |
-| `BACKPORCHER_CI_CHECK_INTERVAL` | 60 | CI check interval (seconds) |
-| `BACKPORCHER_MAX_CI_RETRIES` | 3 | Max CI failure retries |
-| `BACKPORCHER_MAX_VERIFY_RETRIES` | 2 | Max build verify fix attempts |
-| `BACKPORCHER_MAX_CONCURRENCY` | 2 | Parallel agent limit |
-| `BACKPORCHER_GITHUB_OWNER` | (required) | GitHub owner |
-| `BACKPORCHER_ALLOWED_USERS` | (required) | Comma-separated allowed issue authors |
-| `BACKPORCHER_AGENT_USER` | — | Sandbox user for agent |
-| `BACKPORCHER_COORDINATOR_MODEL` | sonnet | Model for coordinator PR reviews |
-
-## CLI Commands
-
-```bash
-backporcher fleet              # Dashboard: running/queued/CI status
-backporcher status             # All tasks overview
-backporcher status <id>        # Single task detail with logs
-backporcher cancel <id>        # Cancel + restore GitHub labels
-backporcher cleanup            # Remove worktrees for finished tasks
-backporcher repo add <url>     # Register a repo
-backporcher repo list          # List repos (shows verify command)
-backporcher repo verify <name> <cmd>  # Set build verification command
-backporcher worker             # Run daemon (foreground, for systemd)
-```
-
-## Operations
-
-```bash
-# Restart worker
-sudo systemctl restart backporcher
-
-# Watch daemon
-journalctl -u backporcher -f
-
-# Task status breakdown
-sqlite3 data/backporcher.db "SELECT status, COUNT(*) FROM tasks GROUP BY status"
-
-# Create test issue
-gh issue create --repo owner/repo \
-  --title "Test task" --body "Do something" --label backporcher
-
-# Deploy new code
-pip install -e . && sudo systemctl restart backporcher
-
-# Re-sync sandbox credentials
-sudo bash scripts/setup-sandbox.sh
-```
+## Context the next session needs
+- **Repo location**: `~/backporcher` (was `~/voltron`)
+- **GitHub URL**: `github.com/montenegronyc/backporcher`
+- **Git remote**: Already updated to new URL
+- **Database**: `data/backporcher.db` (renamed from `voltron.db`, contents unchanged)
+- **Venv**: Recreated fresh at `~/backporcher/.venv` — clean install of `backporcher-0.2.0`
+- **Old service file**: The systemd service at `/etc/systemd/system/` may still reference `voltron` — needs manual update with the new `backporcher.service`
+- **Old sandbox user**: `voltron-agent` user and `voltron` group still exist on the system — the new `backporcher-agent` user hasn't been created yet (need to run `setup-sandbox.sh`)
+- **Labels**: Already renamed on all 5 registered repos (voltron/backporcher, deliverme, shipular-engine, shipular, shipular-api)
