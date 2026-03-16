@@ -1,21 +1,30 @@
 #!/usr/bin/env bash
 # Start the backporcher dashboard server.
-# Reads password from CREDENTIALS_DIRECTORY (systemd LoadCredential) or fallback path.
+# Reads password from CREDENTIALS_DIRECTORY (systemd LoadCredential),
+# BACKPORCHER_DASHBOARD_PASSWORD env var, or exits with an error.
 set -euo pipefail
 
-CRED_DIR="${CREDENTIALS_DIRECTORY:-/etc/openclaw/credentials}"
-PASS_FILE="$CRED_DIR/backporcher-dashboard-password"
+# If using systemd LoadCredential, the password file is in CREDENTIALS_DIRECTORY.
+# Otherwise, BACKPORCHER_DASHBOARD_PASSWORD must be set in the environment.
+if [[ -n "${CREDENTIALS_DIRECTORY:-}" ]]; then
+    PASS_FILE="$CREDENTIALS_DIRECTORY/backporcher-dashboard-password"
+    if [[ -f "$PASS_FILE" ]]; then
+        export BACKPORCHER_DASHBOARD_PASSWORD
+        BACKPORCHER_DASHBOARD_PASSWORD="$(cat "$PASS_FILE")"
+    fi
+fi
 
-if [[ -f "$PASS_FILE" ]]; then
-    export BACKPORCHER_DASHBOARD_PASSWORD
-    BACKPORCHER_DASHBOARD_PASSWORD="$(cat "$PASS_FILE")"
-else
-    echo "ERROR: Password file not found: $PASS_FILE" >&2
+if [[ -z "${BACKPORCHER_DASHBOARD_PASSWORD:-}" ]]; then
+    echo "ERROR: BACKPORCHER_DASHBOARD_PASSWORD not set. Provide it via environment or systemd LoadCredential." >&2
     exit 1
 fi
 
-cd /home/administrator/backporcher
-exec /home/administrator/backporcher/.venv/bin/python3 -c "
+# Resolve the project directory (parent of scripts/)
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
+
+cd "$PROJECT_DIR"
+exec "$PROJECT_DIR/.venv/bin/python3" -c "
 import asyncio, logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(name)s: %(message)s')
 from src.config import load_config

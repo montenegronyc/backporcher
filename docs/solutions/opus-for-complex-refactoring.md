@@ -37,6 +37,5 @@ Consider updating the orchestrator prompt to be more aggressive about assigning 
 
 # Related
 
-- Issues #201-205 (deliverme state extraction)
-- PRs #223, #224, #225, #226 (all merged successfully with opus)
+- PRs merged successfully with opus after sonnet failed on the same tasks
 - The `opus` GitHub label already exists as a manual override

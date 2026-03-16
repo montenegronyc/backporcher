@@ -171,7 +171,7 @@ Single new issues still use the existing `triage_issue()` haiku call. Opus-label
 
 ## Build Verification
 
-Repos can have a `verify_command` (e.g., `cd deliverme-rs && cargo check --workspace 2>&1`) that runs after the agent completes but before PR creation. If verification fails, the agent is re-run with the error output as context, up to `BACKPORCHER_MAX_VERIFY_RETRIES` times.
+Repos can have a `verify_command` (e.g., `npm test 2>&1` or `cargo check --workspace 2>&1`) that runs after the agent completes but before PR creation. If verification fails, the agent is re-run with the error output as context, up to `BACKPORCHER_MAX_VERIFY_RETRIES` times.
 
 ```bash
 backporcher repo verify <name> <command>   # Set verify command

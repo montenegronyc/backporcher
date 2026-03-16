@@ -1,5 +1,7 @@
 # backporcher-dashboard.service — Standalone dashboard web server
-# Runs the aiohttp dashboard behind Caddy reverse proxy (localhost only).
+# Runs the aiohttp dashboard as a separate service (e.g., behind a reverse proxy).
+#
+# Replace YOUR_USER, YOUR_GROUP, and paths below to match your deployment.
 #
 # Install:
 #   sudo cp backporcher-dashboard.service /etc/systemd/system/
@@ -12,29 +14,31 @@ After=network.target
 
 [Service]
 Type=simple
-User=administrator
-Group=administrator
-WorkingDirectory=/home/administrator/backporcher
+User=YOUR_USER
+Group=YOUR_GROUP
+WorkingDirectory=/home/YOUR_USER/backporcher
 
-ExecStart=/home/administrator/backporcher/scripts/start-dashboard.sh
+ExecStart=/home/YOUR_USER/backporcher/scripts/start-dashboard.sh
 
 Restart=on-failure
 RestartSec=5
 
-# Environment
-Environment=BACKPORCHER_BASE_DIR=/home/administrator/backporcher
-Environment=BACKPORCHER_GITHUB_OWNER=montenegronyc
+# Environment — edit these for your setup
+Environment=BACKPORCHER_BASE_DIR=/home/YOUR_USER/backporcher
+Environment=BACKPORCHER_GITHUB_OWNER=your-github-org
 Environment=BACKPORCHER_DASHBOARD_PORT=8085
 Environment=BACKPORCHER_DASHBOARD_HOST=127.0.0.1
-Environment=PATH=/home/administrator/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+Environment=PATH=/home/YOUR_USER/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
-# Load password from credential store
-LoadCredential=backporcher-dashboard-password:/etc/openclaw/credentials/backporcher-dashboard-password
+# Load password from a credential file. Adjust path to your credential store.
+# LoadCredential=backporcher-dashboard-password:/path/to/credentials/backporcher-dashboard-password
+# Or set directly (less secure):
+# Environment=BACKPORCHER_DASHBOARD_PASSWORD=changeme
 
 # Security hardening
 ProtectSystem=full
 ProtectHome=no
-ReadWritePaths=/home/administrator/backporcher/data
+ReadWritePaths=/home/YOUR_USER/backporcher/data
 PrivateTmp=yes
 PrivateDevices=yes
 PrivateIPC=yes
