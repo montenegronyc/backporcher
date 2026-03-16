@@ -1,5 +1,7 @@
 # Backporcher
 
+![Backporcher Demo](resources/backporcher_demo.gif)
+
 A fully autonomous software engineering pipeline. Label a GitHub issue with `backporcher`, and in ~20 minutes you get a merged PR with tests passing and the issue closed — no human in the loop.
 
 Built in early 2026. 100% auto-merge rate on its first production run (15 PRs, zero manual interventions). This mirrors the agent orchestration architectures emerging from Anthropic's Claude Code and Augment's multi-agent systems — but as a standalone, open-source daemon you can run on your own infra.
