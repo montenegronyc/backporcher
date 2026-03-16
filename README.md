@@ -55,7 +55,10 @@ backporcher repo verify myrepo "npm test"
 # Set up sandbox user (one-time, requires root)
 sudo bash scripts/setup-sandbox.sh
 
-# Configure systemd (edit YOUR_USER and env vars first)
+# Generate local service files from templates
+./scripts/configure.sh
+
+# Install systemd unit
 sudo cp backporcher.service /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable --now backporcher
@@ -109,7 +112,7 @@ No web framework, no ORM, no task queue library. Just asyncio + SQLite + subproc
 
 ## Configuration
 
-All via environment variables (set in `backporcher.service` or your shell):
+All via environment variables (set in your `.service` file or shell):
 
 | Variable | Default | Purpose |
 |----------|---------|---------|

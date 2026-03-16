@@ -77,8 +77,9 @@ Controls how much human oversight the pipeline requires. Set via `BACKPORCHER_AP
 | `src/notifications.py` | Webhook notifications (Slack/Discord compatible), fire-and-forget with 5s timeout |
 | `src/config.py` | `Config` dataclass populated from environment variables |
 | `src/github.py` | All `gh` CLI wrappers — issues, labels, PRs, CI status, diffs, comments, merge, close. Runs as `administrator`, never sandboxed |
-| `backporcher.service` | systemd unit file with security hardening directives |
-| `backporcher-dashboard.service` | Standalone systemd unit for dashboard (behind Caddy reverse proxy) |
+| `backporcher.service.example` | systemd unit template with security hardening directives |
+| `backporcher-dashboard.service.example` | Standalone dashboard systemd unit template |
+| `scripts/configure.sh` | Generates local `.service` files from `.example` templates |
 | `scripts/start-dashboard.sh` | Dashboard startup script — loads password from systemd credentials |
 | `scripts/setup-sandbox.sh` | One-time idempotent setup for `backporcher-agent` sandbox user |
 | `HANDOFF.md` | Session handoff document with current status |
