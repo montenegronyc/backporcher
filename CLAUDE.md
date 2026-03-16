@@ -78,6 +78,8 @@ Controls how much human oversight the pipeline requires. Set via `BACKPORCHER_AP
 | `src/config.py` | `Config` dataclass populated from environment variables |
 | `src/github.py` | All `gh` CLI wrappers — issues, labels, PRs, CI status, diffs, comments, merge, close. Runs as `administrator`, never sandboxed |
 | `backporcher.service` | systemd unit file with security hardening directives |
+| `backporcher-dashboard.service` | Standalone systemd unit for dashboard (behind Caddy reverse proxy) |
+| `scripts/start-dashboard.sh` | Dashboard startup script — loads password from systemd credentials |
 | `scripts/setup-sandbox.sh` | One-time idempotent setup for `backporcher-agent` sandbox user |
 | `HANDOFF.md` | Session handoff document with current status |
 
@@ -113,6 +115,7 @@ All config via environment variables (see `src/config.py`):
 | `BACKPORCHER_GITHUB_OWNER` | (required) | GitHub org/owner |
 | `BACKPORCHER_ALLOWED_USERS` | (required) | Comma-separated issue author allowlist |
 | `BACKPORCHER_DASHBOARD_PORT` | `8080` | Dashboard web server port |
+| `BACKPORCHER_DASHBOARD_HOST` | `127.0.0.1` | Dashboard bind address |
 | `BACKPORCHER_DASHBOARD_PASSWORD` | (none) | Dashboard password — dashboard disabled if unset |
 | `BACKPORCHER_WEBHOOK_URL` | (none) | Webhook URL for notifications (Slack/Discord compatible) |
 | `BACKPORCHER_WEBHOOK_EVENTS` | `hold,failed` | Comma-separated events: `hold`, `failed`, `completed`, `paused` |

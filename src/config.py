@@ -44,6 +44,7 @@ class Config:
 
     # Dashboard
     dashboard_port: int = 8080
+    dashboard_host: str = "127.0.0.1"
     dashboard_password: str | None = None
 
     # Webhooks
@@ -89,6 +90,7 @@ def load_config() -> Config:
         max_task_retries=int(os.environ.get("BACKPORCHER_MAX_TASK_RETRIES", "3")),
         approval_mode=os.environ.get("BACKPORCHER_APPROVAL_MODE", "review-merge"),
         dashboard_port=int(os.environ.get("BACKPORCHER_DASHBOARD_PORT", "8080")),
+        dashboard_host=os.environ.get("BACKPORCHER_DASHBOARD_HOST", "127.0.0.1"),
         dashboard_password=os.environ.get("BACKPORCHER_DASHBOARD_PASSWORD") or None,
         webhook_url=os.environ.get("BACKPORCHER_WEBHOOK_URL") or None,
         webhook_events=tuple(

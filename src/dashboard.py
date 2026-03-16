@@ -773,17 +773,22 @@ body {
   gap: var(--s-md);
   padding: 4px 0;
   font-size: 12px;
+  align-items: flex-start;
+  overflow: hidden;
 }
+.timeline-entry:first-of-type { margin-top: 0; }
 
 .timeline-time {
   color: var(--text-3);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
-  min-width: 70px;
+  min-width: 110px;
+  width: 110px;
+  flex-shrink: 0;
   font-size: 10px;
 }
 
-.timeline-event { color: var(--text-2); }
+.timeline-event { color: var(--text-2); overflow-wrap: break-word; word-break: break-word; min-width: 0; }
 .timeline-entry:last-child .timeline-event { color: var(--text-1); }
 
 /* --- LAYOUT --- */
@@ -1117,19 +1122,21 @@ a:hover { text-decoration: underline; color: var(--c-accent-bright); }
   50%      { transform: scale(1.1); opacity: 1; }
 }
 
-/* Specular sweeps across sphere — evenly spaced keyframes for smooth linear motion.
-   Front face (0-50%): visible, sweeping left→right. Back face (50-90%): hidden. */
+/* Specular sweeps across sphere — continuous arc motion.
+   Front face (0-45%): visible, sweeping left→right. Back face (45-85%): hidden, smooth return. */
 @keyframes orb-specular-sweep {
   0%   { left: 4px;  top: 8px; width: 12px; height: 8px;  opacity: 0.3; }
   10%  { left: 8px;  top: 6px; width: 16px; height: 10px; opacity: 0.7; }
   20%  { left: 14px; top: 5px; width: 20px; height: 11px; opacity: 0.85; }
   30%  { left: 22px; top: 5px; width: 18px; height: 10px; opacity: 0.7; }
   40%  { left: 30px; top: 6px; width: 14px; height: 8px;  opacity: 0.35; }
-  50%  { left: 36px; top: 7px; width: 8px;  height: 6px;  opacity: 0; }
-  /* Back face — invisible */
-  60%  { left: 36px; top: 7px; width: 8px;  height: 6px;  opacity: 0; }
-  90%  { left: 2px;  top: 9px; width: 8px;  height: 7px;  opacity: 0; }
-  95%  { left: 3px;  top: 8px; width: 10px; height: 8px;  opacity: 0.15; }
+  45%  { left: 34px; top: 7px; width: 10px; height: 7px;  opacity: 0; }
+  /* Back face — invisible, smooth continuous position return */
+  55%  { left: 30px; top: 8px; width: 8px;  height: 6px;  opacity: 0; }
+  65%  { left: 22px; top: 9px; width: 8px;  height: 6px;  opacity: 0; }
+  75%  { left: 14px; top: 9px; width: 8px;  height: 7px;  opacity: 0; }
+  85%  { left: 6px;  top: 9px; width: 8px;  height: 7px;  opacity: 0; }
+  92%  { left: 3px;  top: 8px; width: 10px; height: 8px;  opacity: 0.15; }
   100% { left: 4px;  top: 8px; width: 12px; height: 8px;  opacity: 0.3; }
 }
 
@@ -1151,17 +1158,19 @@ a:hover { text-decoration: underline; color: var(--c-accent-bright); }
   50%      { opacity: 1; }
 }
 
-/* Caustic sweeps bottom in sync with specular — evenly spaced */
+/* Caustic sweeps bottom in sync with specular — continuous arc */
 @keyframes orb-caustic-sweep {
   0%   { transform: translateX(-55%); opacity: 0.4; }
   10%  { transform: translateX(-50%); opacity: 0.6; }
   20%  { transform: translateX(-42%); opacity: 0.7; }
   30%  { transform: translateX(-35%); opacity: 0.5; }
   40%  { transform: translateX(-28%); opacity: 0.2; }
-  50%  { transform: translateX(-22%); opacity: 0; }
-  60%  { transform: translateX(-22%); opacity: 0; }
-  90%  { transform: translateX(-62%); opacity: 0; }
-  95%  { transform: translateX(-58%); opacity: 0.2; }
+  45%  { transform: translateX(-24%); opacity: 0; }
+  55%  { transform: translateX(-28%); opacity: 0; }
+  65%  { transform: translateX(-35%); opacity: 0; }
+  75%  { transform: translateX(-45%); opacity: 0; }
+  85%  { transform: translateX(-55%); opacity: 0; }
+  92%  { transform: translateX(-57%); opacity: 0.2; }
   100% { transform: translateX(-55%); opacity: 0.4; }
 }
 
@@ -1362,19 +1371,19 @@ function actionBtns(t) {
 /* ═══ Agent Visualizer ═══ */
 function renderAgentViz(tasks) {
   const el = document.getElementById('agent-viz');
-  const working = tasks.filter(t => t.status === 'working');
-  // Fixed 5 agent roles per Figma: Coordinator, Daemon, Orchestrator, Agent 1, Agent 2
+  // Only count tasks as truly working if they don't have a hold
+  const working = tasks.filter(t => t.status === 'working' && !t.hold);
   const roles = [
     { name: 'Coordinator', active: false },
-    { name: 'Daemon', active: true },  // Daemon is always active when worker is running
+    { name: 'Daemon', active: _workerRunning },
     { name: 'Orchestrator', active: false },
     { name: 'Agent 1', active: working.length >= 1 },
     { name: 'Agent 2', active: working.length >= 2 },
   ];
   // Coordinator active if any reviewing
   roles[0].active = tasks.some(t => t.status === 'reviewing');
-  // Orchestrator active if any queued
-  roles[2].active = tasks.some(t => t.status === 'queued');
+  // Orchestrator active if any queued without hold, and not paused
+  roles[2].active = !_paused && tasks.some(t => t.status === 'queued' && !t.hold);
 
   let html = '';
   for (const role of roles) {
@@ -1665,7 +1674,9 @@ function showTaskDetail(taskId) {
     if (!logs.length) { tl.innerHTML = '<div class="timeline-header">Timeline</div><div class="empty">No logs</div>'; return; }
     let lhtml = '<div class="timeline-header">Timeline</div>';
     for (const log of logs) {
-      const ts = (log.created_at||'').split('T').pop().split('.')[0] || '';
+      const raw = (log.created_at||'').split('.')[0] || '';
+      const parts = raw.split(/[T ]/);
+      const ts = parts.length >= 2 ? parts[0].slice(5) + ' ' + parts[1] : raw;
       const cls = log.level === 'error' ? 'text-red' : log.level === 'warn' ? 'text-amber' : '';
       lhtml += `<div class="timeline-entry"><span class="timeline-time">${ts}</span><span class="timeline-event ${cls}">${esc(log.message.substring(0,200))}</span></div>`;
     }
@@ -1758,6 +1769,13 @@ async function dispatchSingle(id, btn) {
   if (btn) { btn.textContent = '...'; btn.disabled = true; }
   try {
     const res = await fetch('/api/tasks/' + id + '/dispatch', {method:'POST', credentials:'include'});
+    if (!res.ok) {
+      const text = await res.text();
+      try { const d = JSON.parse(text); alert('Dispatch failed: ' + (d.error || res.statusText)); }
+      catch(_) { alert('Dispatch failed: ' + res.status + ' ' + res.statusText); }
+      if (btn) { btn.textContent = 'RUN'; btn.disabled = false; }
+      return;
+    }
     const d = await res.json();
     if (!d.ok) {
       alert('Dispatch failed: ' + (d.error || ''));
@@ -2323,60 +2341,64 @@ _dispatching: set[int] = set()
 
 async def dispatch_single_handler(request: web.Request) -> web.Response:
     """Dispatch a single task immediately — runs agent in background without needing the full worker."""
-    db = request.app["db"]
-    config = request.app["config"]
-    task_id = int(request.match_info["id"])
-    task = await db.get_task(task_id)
-    if not task:
-        return web.json_response({"ok": False, "error": "not found"}, status=404)
+    try:
+        db = request.app["db"]
+        config = request.app["config"]
+        task_id = int(request.match_info["id"])
+        task = await db.get_task(task_id)
+        if not task:
+            return web.json_response({"ok": False, "error": "not found"}, status=404)
 
-    if task_id in _dispatching:
-        return web.json_response({"ok": False, "error": "already dispatching"}, status=409)
+        if task_id in _dispatching:
+            return web.json_response({"ok": False, "error": "already dispatching"}, status=409)
 
-    # Allow dispatching queued or failed tasks
-    if task["status"] not in ("queued", "failed"):
-        return web.json_response({"ok": False, "error": f"cannot dispatch task in status={task['status']}"}, status=400)
+        # Allow dispatching queued or failed tasks
+        if task["status"] not in ("queued", "failed"):
+            return web.json_response({"ok": False, "error": f"cannot dispatch task in status={task['status']}"}, status=400)
 
-    # If failed, reset to queued first
-    if task["status"] == "failed":
+        # If failed, reset to queued first
+        if task["status"] == "failed":
+            now = datetime.now(timezone.utc).isoformat()
+            await db.update_task(task_id,
+                status="queued", error_message=None, started_at=None,
+                completed_at=None, branch_name=None, worktree_path=None,
+                pr_url=None, pr_number=None, review_summary=None,
+                exit_code=None, agent_pid=None, output_summary=None, hold=None,
+                agent_started_at=None, agent_finished_at=None,
+            )
+            await db.add_log(task_id, "Reset to queued for single dispatch via dashboard")
+
+        # Claim it (clear any hold so the task actually runs)
         now = datetime.now(timezone.utc).isoformat()
-        await db.update_task(task_id,
-            status="queued", error_message=None, started_at=None,
-            completed_at=None, branch_name=None, worktree_path=None,
-            pr_url=None, pr_number=None, review_summary=None,
-            exit_code=None, agent_pid=None, output_summary=None, hold=None,
-            agent_started_at=None, agent_finished_at=None,
-        )
-        await db.add_log(task_id, "Reset to queued for single dispatch via dashboard")
+        await db.update_task(task_id, status="working", started_at=now, hold=None)
+        await db.add_log(task_id, "Dispatched via dashboard (single task)")
 
-    # Claim it
-    now = datetime.now(timezone.utc).isoformat()
-    await db.update_task(task_id, status="working", started_at=now)
-    await db.add_log(task_id, "Dispatched via dashboard (single task)")
+        _dispatching.add(task_id)
 
-    _dispatching.add(task_id)
-
-    # Run in background
-    async def _run():
-        try:
-            from .dispatcher import dispatch_task
-            fresh = await db.get_task(task_id)
-            if fresh:
-                await dispatch_task(fresh, config, db)
-        except Exception:
-            log.exception("Single dispatch failed for task %d", task_id)
+        # Run in background
+        async def _run():
             try:
-                await db.update_task(task_id, status="failed",
-                    error_message="Single dispatch error", completed_at=datetime.now(timezone.utc).isoformat())
-                await db.add_log(task_id, "Single dispatch failed", level="error")
+                from .dispatcher import dispatch_task
+                fresh = await db.get_task(task_id)
+                if fresh:
+                    await dispatch_task(fresh, config, db)
             except Exception:
-                pass
-        finally:
-            _dispatching.discard(task_id)
+                log.exception("Single dispatch failed for task %d", task_id)
+                try:
+                    await db.update_task(task_id, status="failed",
+                        error_message="Single dispatch error", completed_at=datetime.now(timezone.utc).isoformat())
+                    await db.add_log(task_id, "Single dispatch failed", level="error")
+                except Exception:
+                    pass
+            finally:
+                _dispatching.discard(task_id)
 
-    asyncio.create_task(_run())
+        asyncio.create_task(_run())
 
-    return web.json_response({"ok": True, "task_id": task_id, "action": "dispatch"})
+        return web.json_response({"ok": True, "task_id": task_id, "action": "dispatch"})
+    except Exception as e:
+        log.exception("dispatch_single_handler error")
+        return web.json_response({"ok": False, "error": str(e)}, status=500)
 
 
 async def create_task_handler(request: web.Request) -> web.Response:
@@ -2491,7 +2513,7 @@ async def start_dashboard(db: Database, config: Config):
 
     runner = web.AppRunner(app)
     await runner.setup()
-    site = web.TCPSite(runner, "0.0.0.0", config.dashboard_port)
+    site = web.TCPSite(runner, config.dashboard_host, config.dashboard_port)
     await site.start()
     log.info("Dashboard running on port %d", config.dashboard_port)
 

@@ -1,0 +1,55 @@
+# backporcher-dashboard.service — Standalone dashboard web server
+# Runs the aiohttp dashboard behind Caddy reverse proxy (localhost only).
+#
+# Install:
+#   sudo cp backporcher-dashboard.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now backporcher-dashboard
+
+[Unit]
+Description=Backporcher Dashboard
+After=network.target
+
+[Service]
+Type=simple
+User=administrator
+Group=administrator
+WorkingDirectory=/home/administrator/backporcher
+
+ExecStart=/home/administrator/backporcher/scripts/start-dashboard.sh
+
+Restart=on-failure
+RestartSec=5
+
+# Environment
+Environment=BACKPORCHER_BASE_DIR=/home/administrator/backporcher
+Environment=BACKPORCHER_GITHUB_OWNER=montenegronyc
+Environment=BACKPORCHER_DASHBOARD_PORT=8085
+Environment=BACKPORCHER_DASHBOARD_HOST=127.0.0.1
+Environment=PATH=/home/administrator/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+# Load password from credential store
+LoadCredential=backporcher-dashboard-password:/etc/openclaw/credentials/backporcher-dashboard-password
+
+# Security hardening
+ProtectSystem=full
+ProtectHome=no
+ReadWritePaths=/home/administrator/backporcher/data
+PrivateTmp=yes
+PrivateDevices=yes
+PrivateIPC=yes
+ProtectKernelTunables=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectHostname=yes
+ProtectClock=yes
+RestrictNamespaces=yes
+NoNewPrivileges=yes
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=backporcher-dashboard
+
+[Install]
+WantedBy=multi-user.target
