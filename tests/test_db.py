@@ -48,7 +48,7 @@ class TestSchemaMigration:
 
         # Should be latest version
         cur = db.db.execute("SELECT version FROM schema_version")
-        assert cur.fetchone()[0] == 6
+        assert cur.fetchone()[0] == 7
 
         # Should have all columns across all migrations
         cur = db.db.execute("PRAGMA table_info(tasks)")
@@ -60,9 +60,17 @@ class TestSchemaMigration:
         assert "priority" in columns
         assert "depends_on_task_id" in columns
         assert "hold" in columns
+        assert "agent_started_at" in columns
+        assert "agent_finished_at" in columns
+        assert "model_used" in columns
+        assert "initial_model" in columns
 
         # Should have system_state table
         cur = db.db.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='system_state'")
+        assert cur.fetchone() is not None
+
+        # Should have metrics table
+        cur = db.db.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='metrics'")
         assert cur.fetchone() is not None
 
         db.close()
@@ -77,7 +85,7 @@ class TestSchemaMigration:
 
         # Version upgraded to latest
         cur = db.db.execute("SELECT version FROM schema_version")
-        assert cur.fetchone()[0] == 6
+        assert cur.fetchone()[0] == 7
 
         # Data preserved
         cur = db.db.execute("SELECT COUNT(*) FROM tasks")
@@ -117,7 +125,7 @@ class TestSchemaMigration:
         db.connect()
 
         cur = db.db.execute("SELECT version FROM schema_version")
-        assert cur.fetchone()[0] == 6
+        assert cur.fetchone()[0] == 7
 
         cur = db.db.execute("SELECT COUNT(*) FROM tasks")
         assert cur.fetchone()[0] == 2

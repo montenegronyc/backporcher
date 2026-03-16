@@ -6,7 +6,7 @@ import aiosqlite
 from pathlib import Path
 from datetime import datetime, timezone
 
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 
 SCHEMA_V1 = """
 CREATE TABLE IF NOT EXISTS repos (
@@ -150,6 +150,10 @@ CREATE TABLE IF NOT EXISTS tasks (
     priority INTEGER DEFAULT 100,
     depends_on_task_id INTEGER,
     hold TEXT,
+    agent_started_at TEXT,
+    agent_finished_at TEXT,
+    model_used TEXT,
+    initial_model TEXT,
     started_at TEXT,
     completed_at TEXT,
     created_at TEXT DEFAULT (datetime('now'))
@@ -164,6 +168,19 @@ CREATE TABLE IF NOT EXISTS system_state (
     value TEXT NOT NULL,
     updated_at TEXT DEFAULT (datetime('now'))
 );
+
+CREATE TABLE IF NOT EXISTS metrics (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    event TEXT NOT NULL,
+    task_id INTEGER,
+    repo TEXT,
+    model TEXT,
+    value REAL,
+    created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_metrics_event ON metrics(event);
+CREATE INDEX IF NOT EXISTS idx_metrics_created_at ON metrics(created_at);
 """)
         conn.execute("CREATE TABLE IF NOT EXISTS schema_version (version INTEGER PRIMARY KEY)")
         conn.execute("INSERT OR REPLACE INTO schema_version (version) VALUES (?)", (SCHEMA_VERSION,))
@@ -267,6 +284,35 @@ CREATE TABLE IF NOT EXISTS system_state (
                 updated_at TEXT DEFAULT (datetime('now'))
             )
         """)
+        conn.execute("CREATE TABLE IF NOT EXISTS schema_version (version INTEGER PRIMARY KEY)")
+        conn.execute("INSERT OR REPLACE INTO schema_version (version) VALUES (?)", (SCHEMA_VERSION,))
+        conn.commit()
+
+    if version < 7:
+        # v7: add metrics columns to tasks + metrics table
+        for col in [
+            "ALTER TABLE tasks ADD COLUMN agent_started_at TEXT",
+            "ALTER TABLE tasks ADD COLUMN agent_finished_at TEXT",
+            "ALTER TABLE tasks ADD COLUMN model_used TEXT",
+            "ALTER TABLE tasks ADD COLUMN initial_model TEXT",
+        ]:
+            try:
+                conn.execute(col)
+            except Exception:
+                pass  # Column already exists
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS metrics (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                event TEXT NOT NULL,
+                task_id INTEGER,
+                repo TEXT,
+                model TEXT,
+                value REAL,
+                created_at TEXT NOT NULL
+            )
+        """)
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_metrics_event ON metrics(event)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_metrics_created_at ON metrics(created_at)")
         conn.execute("CREATE TABLE IF NOT EXISTS schema_version (version INTEGER PRIMARY KEY)")
         conn.execute("INSERT OR REPLACE INTO schema_version (version) VALUES (?)", (SCHEMA_VERSION,))
         conn.commit()
@@ -527,6 +573,27 @@ class Database:
         ) as cur:
             return [dict(r) for r in await cur.fetchall()]
 
+    async def record_metric(
+        self, event: str, task_id: int | None = None,
+        repo: str | None = None, model: str | None = None,
+        value: float | None = None,
+    ):
+        """Append a metric event. Never raises — logs and continues on failure."""
+        try:
+            now = datetime.now(timezone.utc).isoformat()
+            async with self._write_lock:
+                await self.db.execute(
+                    "INSERT INTO metrics (event, task_id, repo, model, value, created_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?)",
+                    (event, task_id, repo, model, value, now),
+                )
+                await self.db.commit()
+        except Exception:
+            import logging
+            logging.getLogger("backporcher.db").warning(
+                "Failed to record metric %s for task %s", event, task_id, exc_info=True,
+            )
+
     async def update_task(self, task_id: int, **fields):
         if not fields:
             return
@@ -537,6 +604,7 @@ class Database:
             "started_at", "completed_at",
             "pr_number", "github_issue_number", "github_issue_url", "retry_count",
             "priority", "depends_on_task_id", "hold",
+            "agent_started_at", "agent_finished_at", "model_used", "initial_model",
         }
         fields = {k: v for k, v in fields.items() if k in allowed}
         if not fields:
@@ -802,6 +870,26 @@ CREATE INDEX IF NOT EXISTS idx_task_logs_task_id ON task_logs(task_id);
         rows.reverse()
         return rows
 
+    def record_metric(
+        self, event: str, task_id: int | None = None,
+        repo: str | None = None, model: str | None = None,
+        value: float | None = None,
+    ):
+        """Append a metric event. Never raises — logs and continues on failure."""
+        try:
+            now = datetime.now(timezone.utc).isoformat()
+            self.db.execute(
+                "INSERT INTO metrics (event, task_id, repo, model, value, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (event, task_id, repo, model, value, now),
+            )
+            self.db.commit()
+        except Exception:
+            import logging
+            logging.getLogger("backporcher.db").warning(
+                "Failed to record metric %s for task %s", event, task_id, exc_info=True,
+            )
+
     def update_task(self, task_id: int, **fields):
         if not fields:
             return
@@ -812,6 +900,7 @@ CREATE INDEX IF NOT EXISTS idx_task_logs_task_id ON task_logs(task_id);
             "started_at", "completed_at",
             "pr_number", "github_issue_number", "github_issue_url", "retry_count",
             "priority", "depends_on_task_id", "hold",
+            "agent_started_at", "agent_finished_at", "model_used", "initial_model",
         }
         fields = {k: v for k, v in fields.items() if k in allowed}
         if not fields:

@@ -4,6 +4,7 @@ import asyncio
 import logging
 import os
 import signal
+from datetime import datetime, timezone
 
 from .config import Config, load_config
 from .db import Database
@@ -320,6 +321,39 @@ class WorkerDaemon:
                 await dispatch_task(task, self.config, self.db)
             except Exception:
                 log.exception("Unhandled error dispatching task %d", task["id"])
+            finally:
+                # Record terminal metrics after dispatch completes
+                try:
+                    fresh = await self.db.get_task(task["id"])
+                    if fresh:
+                        await self._record_terminal_metric(fresh)
+                except Exception:
+                    log.warning("Failed to record terminal metric for task %d", task["id"], exc_info=True)
+
+    async def _record_terminal_metric(self, task: dict):
+        """Record metrics for task completion or failure."""
+        status = task["status"]
+        task_id = task["id"]
+        repo = task.get("repo_name")
+        model = task.get("model_used") or task.get("model")
+
+        if status == "completed":
+            # Compute agent runtime
+            duration = self._compute_duration(task.get("agent_started_at"), task.get("agent_finished_at"))
+            await self.db.record_metric("task_completed", task_id=task_id, repo=repo, model=model, value=duration)
+        elif status == "failed":
+            await self.db.record_metric("task_failed", task_id=task_id, repo=repo, model=model)
+
+    @staticmethod
+    def _compute_duration(start: str | None, end: str | None) -> float | None:
+        if not start or not end:
+            return None
+        try:
+            s = datetime.fromisoformat(start.replace("Z", "+00:00"))
+            e = datetime.fromisoformat(end.replace("Z", "+00:00"))
+            return (e - s).total_seconds()
+        except Exception:
+            return None
 
     # --- Loop 3: Coordinator Review ---
 
@@ -472,6 +506,11 @@ class WorkerDaemon:
                                 )
                             await cleanup_task_artifacts(task, self.db)
 
+                            # Webhook: failed
+                            from . import notifications as _notif
+                            _title = task.get("prompt", "")[:80]
+                            await _notif.notify_failed(task_id, _title, f"coordinator rejected PR (retries exhausted)")
+
             except Exception:
                 log.exception("Error in coordinator review loop")
 
@@ -577,15 +616,31 @@ class WorkerDaemon:
                     f"CI passed. Awaiting merge approval.\n\n"
                     f"Run `backporcher approve {task_id}` or use the dashboard to merge.",
                 )
+            # Webhook notification
+            from . import notifications
+            title = task.get("prompt", "")[:80]
+            await notifications.notify_hold(task_id, title, "merge_approval")
             return
 
         # Auto-merge the PR
         if pr_number:
             merged = await merge_pr(repo_full, pr_number)
             if merged:
-                await self.db.update_task(task_id, status="completed")
+                now = datetime.now(timezone.utc).isoformat()
+                await self.db.update_task(task_id, status="completed", completed_at=now)
                 await self.db.add_log(task_id, f"PR #{pr_number} merged (squash)")
                 log.info("Task #%d: PR #%d merged", task_id, pr_number)
+
+                # Record merge metric
+                try:
+                    merge_duration = self._compute_duration(task.get("created_at"), now)
+                    model = task.get("model_used") or task.get("model")
+                    await self.db.record_metric(
+                        "merge", task_id=task_id, repo=task.get("repo_name"),
+                        model=model, value=merge_duration,
+                    )
+                except Exception:
+                    log.warning("Failed to record merge metric for task %d", task_id, exc_info=True)
 
                 issue_num = task.get("github_issue_number")
                 if issue_num:
@@ -600,6 +655,14 @@ class WorkerDaemon:
                     )
                     await close_issue(repo_full, issue_num)
                 await cleanup_task_artifacts(task, self.db)
+
+                # Webhook: completed
+                from . import notifications
+                title = task.get("prompt", "")[:80]
+                dur = self._compute_duration(task.get("created_at"), now)
+                dur_str = f"{int(dur // 60)}m" if dur else "?"
+                model = task.get("model_used") or task.get("model") or "?"
+                await notifications.notify_completed(task_id, title, dur_str, model)
                 return
 
             # Merge failed — check if it's a conflict
@@ -658,9 +721,21 @@ class WorkerDaemon:
 
         merged = await merge_pr(repo_full, pr_number)
         if merged:
-            await self.db.update_task(task_id, status="completed")
+            now = datetime.now(timezone.utc).isoformat()
+            await self.db.update_task(task_id, status="completed", completed_at=now)
             await self.db.add_log(task_id, f"PR #{pr_number} merged (squash)")
             log.info("Task #%d: PR #%d merged", task_id, pr_number)
+
+            # Record merge metric
+            try:
+                merge_duration = self._compute_duration(task.get("created_at"), now)
+                model = task.get("model_used") or task.get("model")
+                await self.db.record_metric(
+                    "merge", task_id=task_id, repo=task.get("repo_name"),
+                    model=model, value=merge_duration,
+                )
+            except Exception:
+                log.warning("Failed to record merge metric for task %d", task_id, exc_info=True)
 
             issue_num = task.get("github_issue_number")
             if issue_num:
@@ -675,6 +750,14 @@ class WorkerDaemon:
                 )
                 await close_issue(repo_full, issue_num)
             await cleanup_task_artifacts(task, self.db)
+
+            # Webhook: completed
+            from . import notifications
+            title = task.get("prompt", "")[:80]
+            dur = self._compute_duration(task.get("created_at"), now)
+            dur_str = f"{int(dur // 60)}m" if dur else "?"
+            model = task.get("model_used") or task.get("model") or "?"
+            await notifications.notify_completed(task_id, title, dur_str, model)
             return
 
         # Merge failed — check if it's a conflict
@@ -740,6 +823,10 @@ class WorkerDaemon:
                 level="warn",
             )
             log.info("Task #%d: CI failed, retry %d/%d", task_id, new_count, self.config.max_ci_retries)
+            await self.db.record_metric(
+                "retry_ci", task_id=task_id, repo=task.get("repo_name"),
+                model=task.get("model"),
+            )
 
             issue_num = task.get("github_issue_number")
             if issue_num:
@@ -771,6 +858,11 @@ class WorkerDaemon:
                     f"Marking as failed. Re-add the `backporcher` label to retry.",
                 )
             await cleanup_task_artifacts(task, self.db)
+
+            # Webhook: failed
+            from . import notifications
+            title = task.get("prompt", "")[:80]
+            await notifications.notify_failed(task_id, title, f"CI failed after {self.config.max_ci_retries} retries")
 
     async def _process_retry(self, task: dict):
         """Fetch CI logs and re-run agent with context."""
@@ -906,6 +998,12 @@ async def _run_worker():
 
     if not preflight_ok:
         log.error("Preflight checks failed — starting anyway but tasks may fail")
+
+    # Initialize webhook notifications
+    from . import notifications
+    notifications.init(config)
+    if config.webhook_url:
+        log.info("Webhooks enabled: %s (events: %s)", config.webhook_url, ",".join(config.webhook_events))
 
     daemon = WorkerDaemon(config, db)
 

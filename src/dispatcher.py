@@ -1152,13 +1152,31 @@ async def dispatch_task(task: dict, config: Config, db: Database):
         # Ensure agent credentials are fresh before launching
         await sync_agent_credentials(config)
 
+        # Record agent start timing and model info
+        agent_start_now = datetime.now(timezone.utc).isoformat()
+        await db.update_task(
+            task_id,
+            agent_started_at=agent_start_now,
+            initial_model=task["model"],
+            model_used=task["model"],
+        )
+        await db.record_metric(
+            "agent_start", task_id=task_id,
+            repo=task.get("repo_name"), model=task["model"],
+        )
+
         # Run agent
         await db.add_log(task_id, "Running agent...")
         exit_code, summary = await run_agent(task, worktree_path, config, db)
+
+        # Record agent finish timing
+        agent_finish_now = datetime.now(timezone.utc).isoformat()
         await db.update_task(
             task_id,
             exit_code=exit_code,
             output_summary=summary[:4000] if summary else None,
+            agent_finished_at=agent_finish_now,
+            model_used=task["model"],
         )
 
         if exit_code != 0:
@@ -1188,6 +1206,10 @@ async def dispatch_task(task: dict, config: Config, db: Database):
                 log.info(
                     "Task %d: agent failed (%s), retry %d/%d (model=%s)",
                     task_id, reason, new_count, max_retries, new_model,
+                )
+                await db.record_metric(
+                    "retry_agent", task_id=task_id,
+                    repo=task.get("repo_name"), model=new_model,
                 )
                 return
 
@@ -1320,6 +1342,10 @@ async def dispatch_task(task: dict, config: Config, db: Database):
             log.info(
                 "Task %d: error, retry %d/%d (model=%s)",
                 task_id, new_count, config.max_task_retries, new_model,
+            )
+            await db.record_metric(
+                "retry_agent", task_id=task_id,
+                repo=task.get("repo_name"), model=new_model,
             )
         else:
             await db.update_task(

@@ -46,6 +46,10 @@ class Config:
     dashboard_port: int = 8080
     dashboard_password: str | None = None
 
+    # Webhooks
+    webhook_url: str | None = None
+    webhook_events: tuple[str, ...] = ("hold", "failed")
+
 
 def load_config() -> Config:
     """Load config from environment variables."""
@@ -86,4 +90,10 @@ def load_config() -> Config:
         approval_mode=os.environ.get("BACKPORCHER_APPROVAL_MODE", "review-merge"),
         dashboard_port=int(os.environ.get("BACKPORCHER_DASHBOARD_PORT", "8080")),
         dashboard_password=os.environ.get("BACKPORCHER_DASHBOARD_PASSWORD") or None,
+        webhook_url=os.environ.get("BACKPORCHER_WEBHOOK_URL") or None,
+        webhook_events=tuple(
+            e.strip() for e in
+            os.environ.get("BACKPORCHER_WEBHOOK_EVENTS", "hold,failed").split(",")
+            if e.strip()
+        ),
     )

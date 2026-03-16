@@ -30,7 +30,7 @@ The worker daemon (`src/worker.py`) runs up to 6 async loops via `asyncio.gather
 3. **Coordinator Reviewer** (every 15s) — reviews each PR diff via `claude -p`, checks for conflicts with other open PRs, approves or rejects. Backfills missing `pr_number` from `pr_url`
 4. **CI Monitor** (every 60s) — checks CI status on approved PRs, auto-merges passing PRs (squash), auto-retries failures with CI log context, closes GitHub issues on success
 5. **Artifact Cleanup** (every 5 min) — removes worktrees and remote branches for terminal tasks older than 10 minutes
-6. **Dashboard** (optional) — aiohttp web server with HTTP Basic Auth, real-time SSE updates every 5s, dark-themed HTML UI. Only starts when `BACKPORCHER_DASHBOARD_PASSWORD` is set
+6. **Dashboard** (optional) — aiohttp web server with HTTP Basic Auth, real-time SSE updates every 5s. Tactical data interface theme: cyan-dominant, corner-bracketed panels, Share Tech Mono + Rajdhani typography, scan-line overlay, pulsing badges for active states. Only starts when `BACKPORCHER_DASHBOARD_PASSWORD` is set. Features: inline Approve/Hold/Reject/Escalate/Re-queue buttons, task detail panel with timeline, edit modal for prompt/model/priority rewriting, pipeline summary with metrics (merged count, success rate, avg time, retry rate), global Pause/Resume toggle. API: `POST /api/tasks/{id}/approve|hold|reject|edit|requeue|escalate`, `POST /api/pause|resume`, `GET /api/stats`
 
 ## Task Status Flow
 
@@ -68,11 +68,13 @@ Controls how much human oversight the pipeline requires. Set via `BACKPORCHER_AP
 
 | File | Purpose |
 |------|---------|
-| `src/cli.py` | CLI entry point: `fleet`, `status`, `cancel`, `cleanup`, `approve`, `hold`, `release`, `pause`, `resume`, `repo`, `worker` |
+| `src/cli.py` | CLI entry point: `fleet`, `status`, `stats`, `cancel`, `cleanup`, `approve`, `hold`, `release`, `pause`, `resume`, `repo`, `worker` |
 | `src/worker.py` | Background daemon — 6 async loops, graceful shutdown, startup recovery, preflight checks |
-| `src/dashboard.py` | aiohttp web dashboard: HTTP Basic Auth, SSE real-time updates, JSON API, dark-themed HTML |
+| `src/dashboard.py` | aiohttp web dashboard: HTTP Basic Auth, SSE real-time updates, JSON API, tactical data interface theme (cyan/corner-bracketed), task control (approve/hold/reject/edit/requeue/escalate) |
+| `backporcher-theme.css` | CSS design tokens and classes for the tactical dashboard theme (reference file — inlined in dashboard.py) |
 | `src/dispatcher.py` | Worktree setup, credential sync, agent execution, build verification, PR creation, coordinator review runner, CI retry, transient failure auto-retry |
-| `src/db.py` | SQLite with WAL mode, schema migrations (v1→v6), async (`Database`) + sync (`SyncDatabase`) wrappers, write lock for concurrency |
+| `src/db.py` | SQLite with WAL mode, schema migrations (v1→v7), async (`Database`) + sync (`SyncDatabase`) wrappers, write lock for concurrency |
+| `src/notifications.py` | Webhook notifications (Slack/Discord compatible), fire-and-forget with 5s timeout |
 | `src/config.py` | `Config` dataclass populated from environment variables |
 | `src/github.py` | All `gh` CLI wrappers — issues, labels, PRs, CI status, diffs, comments, merge, close. Runs as `administrator`, never sandboxed |
 | `backporcher.service` | systemd unit file with security hardening directives |
@@ -81,9 +83,9 @@ Controls how much human oversight the pipeline requires. Set via `BACKPORCHER_AP
 
 ## Database
 
-SQLite with WAL mode at `data/backporcher.db`. Schema version 6.
+SQLite with WAL mode at `data/backporcher.db`. Schema version 7.
 
-**Tables:** `repos` (with `verify_command`), `tasks` (with `review_summary`, `pr_number`, `retry_count`, `priority`, `depends_on_task_id`, `hold`), `task_logs`, `system_state`, `schema_version`
+**Tables:** `repos` (with `verify_command`), `tasks` (with `review_summary`, `pr_number`, `retry_count`, `priority`, `depends_on_task_id`, `hold`, `agent_started_at`, `agent_finished_at`, `model_used`, `initial_model`), `task_logs`, `metrics`, `system_state`, `schema_version`
 
 **Concurrency:** All writes go through `asyncio.Lock` (`_write_lock`) to prevent SQLite write conflicts. `busy_timeout=5000ms` for reader contention. The sync wrapper (`SyncDatabase`) is used by CLI commands only.
 
@@ -112,6 +114,8 @@ All config via environment variables (see `src/config.py`):
 | `BACKPORCHER_ALLOWED_USERS` | (required) | Comma-separated issue author allowlist |
 | `BACKPORCHER_DASHBOARD_PORT` | `8080` | Dashboard web server port |
 | `BACKPORCHER_DASHBOARD_PASSWORD` | (none) | Dashboard password — dashboard disabled if unset |
+| `BACKPORCHER_WEBHOOK_URL` | (none) | Webhook URL for notifications (Slack/Discord compatible) |
+| `BACKPORCHER_WEBHOOK_EVENTS` | `hold,failed` | Comma-separated events: `hold`, `failed`, `completed`, `paused` |
 
 ## Security Model
 
@@ -195,6 +199,7 @@ backporcher resume             # Resume the dispatch queue
 backporcher cancel <id>        # Cancel task + kill agent + restore GitHub labels
 backporcher cleanup            # Remove worktrees for finished tasks
 backporcher cleanup <id>       # Remove specific task's worktree
+backporcher stats              # Pipeline performance stats
 backporcher repo add <url>     # Register a GitHub repo
 backporcher repo list          # List registered repos (shows verify command)
 backporcher repo verify <name> <cmd>  # Set build verification command
