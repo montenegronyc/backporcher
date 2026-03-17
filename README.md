@@ -4,13 +4,13 @@
 
 A fully autonomous software engineering pipeline. Label a GitHub issue with `backporcher`, and in ~20 minutes you get a merged PR with tests passing and the issue closed. A real-time web dashboard lets you manage the fleet: approve or hold tasks before merge, pause/resume the dispatch queue, re-run failed agents, and monitor every stage of the pipeline from triage to merge.
 
-Built in early 2026. 100% auto-merge rate on its first production run (15 PRs, zero manual interventions). This mirrors the agent orchestration architectures emerging from Anthropic's Claude Code and Augment's multi-agent systems — but as a standalone, open-source daemon you can run on your own infra.
+Built in early 2026. 100% auto-merge rate on its first production run (15 PRs, zero manual interventions). This mirrors the agent orchestration architectures emerging from Anthropic's Claude Code and Augment's multi-agent systems - but as a standalone, open-source daemon you can run on your own infra.
 
 ## What makes it different
 
-Most "AI coding" tools are glorified autocomplete. Backporcher is an **end-to-end pipeline**: it triages, plans dependencies, dispatches sandboxed agents, reviews their work with a coordinator agent, retries CI failures with error context, and merges — all autonomously.
+Most "AI coding" tools are glorified autocomplete. Backporcher is an **end-to-end pipeline**: it triages, plans dependencies, dispatches sandboxed agents, reviews their work with a coordinator agent, retries CI failures with error context, and merges - all autonomously.
 
-The key insight: treat agents like junior developers. Give them isolated worktrees, review their PRs, and let CI be the final gate. No magic — just good engineering around `claude -p`.
+The key insight: treat agents like junior developers. Give them isolated worktrees, review their PRs, and let CI be the final gate. No magic - just good engineering around `claude -p`.
 
 ## The Pipeline
 
@@ -27,16 +27,16 @@ GitHub Issue (label: backporcher)
                   → Issue closed
 ```
 
-For 2+ issues in the same repo, a single Haiku call batch-orchestrates all of them — assigning models, priorities, and identifying which issues must be serialized (e.g., both touching the same component).
+For 2+ issues in the same repo, a single Haiku call batch-orchestrates all of them - assigning models, priorities, and identifying which issues must be serialized (e.g., both touching the same component).
 
 ## Orchestrator Mode
 
 Backporcher defaults to **review-merge** mode: everything is automatic except the final merge to main, which requires `backporcher approve <id>` or a click on the web dashboard. This gives you full visibility and a kill switch without slowing down the pipeline.
 
 Three modes via `BACKPORCHER_APPROVAL_MODE`:
-- **`full-auto`** — hands-off, merge on CI pass (the original behavior)
-- **`review-merge`** — pause before merge, approve via CLI or dashboard (default)
-- **`review-all`** — pause before dispatch AND before merge
+- **`full-auto`** - hands-off, merge on CI pass (the original behavior)
+- **`review-merge`** - pause before merge, approve via CLI or dashboard (default)
+- **`review-all`** - pause before dispatch AND before merge
 
 Pre-dispatch conflict detection (powered by Haiku, ~$0.001/call) automatically serializes tasks that would touch overlapping files. Global pause/resume lets you freeze the queue without stopping in-flight work.
 
@@ -79,7 +79,7 @@ journalctl -u backporcher -f
 ## CLI
 
 ```bash
-backporcher fleet              # Live dashboard — what's running, queued, reviewing
+backporcher fleet              # Live dashboard - what's running, queued, reviewing
 backporcher status <id>        # Task detail with logs
 backporcher approve <id>       # Approve a held task (merge or dispatch)
 backporcher hold <id>          # Manually hold any task
@@ -99,14 +99,14 @@ backporcher worker             # Run daemon foreground
 
 Real-time orchestration dashboard with SSE updates every 5 seconds. Enable by setting `BACKPORCHER_DASHBOARD_PASSWORD`.
 
-- **Fleet overview** — every task's status, repo, model, elapsed time, and current pipeline stage
-- **Agent visualizer** — animated orbs showing which agents (coordinator, orchestrator, workers) are active
-- **Task control** — approve, hold, reject, re-queue, or escalate individual tasks inline
-- **Dispatch on demand** — run a single task immediately without waiting for the poller
-- **Edit in flight** — rewrite a task's prompt, switch its model, or change priority before dispatch
-- **Pipeline metrics** — merged count, success rate, average time-to-merge, retry rate
-- **Global pause/resume** — freeze the dispatch queue while in-flight work finishes
-- **Task detail panel** — full timeline with logs, review summary, PR link, and error context
+- **Fleet overview** - every task's status, repo, model, elapsed time, and current pipeline stage
+- **Agent visualizer** - animated orbs showing which agents (coordinator, orchestrator, workers) are active
+- **Task control** - approve, hold, reject, re-queue, or escalate individual tasks inline
+- **Dispatch on demand** - run a single task immediately without waiting for the poller
+- **Edit in flight** - rewrite a task's prompt, switch its model, or change priority before dispatch
+- **Pipeline metrics** - merged count, success rate, average time-to-merge, retry rate
+- **Global pause/resume** - freeze the dispatch queue while in-flight work finishes
+- **Task detail panel** - full timeline with logs, review summary, PR link, and error context
 
 ## Architecture
 
@@ -151,11 +151,11 @@ All via environment variables (set in your `.service` file or shell):
 
 ## Security Model
 
-Most open-source agent tools run with full user privileges. Backporcher doesn't. The entire design is built around the assumption that **AI-generated code is untrusted** — and the system treats it that way at every layer.
+Most open-source agent tools run with full user privileges. Backporcher doesn't. The entire design is built around the assumption that **AI-generated code is untrusted** - and the system treats it that way at every layer.
 
 ### Privilege Separation
 
-The worker daemon runs as your user and handles all GitHub API operations (comments, merges, label changes, issue closes). Agents run as a separate `backporcher-agent` user via `sudo -u` — a restricted system account that:
+The worker daemon runs as your user and handles all GitHub API operations (comments, merges, label changes, issue closes). Agents run as a separate `backporcher-agent` user via `sudo -u` - a restricted system account that:
 
 - **Can:** Read/write worktree files, git commit/push, run build/test tools
 - **Cannot:** Read your `~/.ssh`, `~/.claude`, GitHub tokens, or any env secrets. Cannot sudo. Cannot modify system files. Cannot access other repos
@@ -168,10 +168,10 @@ This means a compromised or misbehaving agent can only damage the worktree it wa
 |-------|-------------|
 | **Agent sandbox** | `sudo -u backporcher-agent` with `prlimit` (500 processes, 2GB file limit) |
 | **Env scrubbing** | `ANTHROPIC_API_KEY`, `GITHUB_TOKEN`, etc. stripped from agent subprocesses |
-| **Author allowlist** | Only issues from specified GitHub users trigger agents — prevents arbitrary code execution from unknown authors |
+| **Author allowlist** | Only issues from specified GitHub users trigger agents - prevents arbitrary code execution from unknown authors |
 | **Coordinator review** | A separate agent reviews every PR diff for bugs, regressions, and scope creep before CI runs |
 | **systemd hardening** | `PrivateTmp`, `PrivateDevices`, `ProtectSystem=full`, `RestrictNamespaces`, and more |
-| **Credential copying** | Agent gets credential *copies*, not symlinks — no path traversal back to your home |
+| **Credential copying** | Agent gets credential *copies*, not symlinks - no path traversal back to your home |
 
 ### Design Trade-offs
 
@@ -196,7 +196,7 @@ When an agent fails, Backporcher doesn't just retry blindly:
 
 ## Scaling Limits
 
-Backporcher uses SQLite with WAL mode and a single async write lock. This is production-grade for single-writer workloads and works well at 2-5 concurrent agents. At 10+ concurrent agents, the write lock would become a bottleneck — you'd want to move to PostgreSQL or shard the task queue. For most users running on a single machine, this isn't a practical concern. If you need multi-machine scaling, Backporcher's architecture (poller → queue → executor) maps cleanly onto a proper job queue like Redis + RQ.
+Backporcher uses SQLite with WAL mode and a single async write lock. This is production-grade for single-writer workloads and works well at 2-5 concurrent agents. At 10+ concurrent agents, the write lock would become a bottleneck - you'd want to move to PostgreSQL or shard the task queue. For most users running on a single machine, this isn't a practical concern. If you need multi-machine scaling, Backporcher's architecture (poller → queue → executor) maps cleanly onto a proper job queue like Redis + RQ.
 
 SQLite + WAL mode is not a toy database. It's what [Litestream](https://litestream.io/) was built to back up, and it handles the write patterns here (a few writes per minute) with no contention. If you want backup guarantees, point Litestream at `data/backporcher.db`.
 
