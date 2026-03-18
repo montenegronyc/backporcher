@@ -948,7 +948,7 @@ a:hover { text-decoration: underline; color: var(--c-accent-bright); }
 .progress-fill.red { background: linear-gradient(90deg, var(--c-danger), var(--c-danger-bright)); }
 
 /* Glass bar chart */
-.bar-chart { display: flex; align-items: flex-end; gap: 4px; height: 40px; padding-top: var(--s-sm); }
+.bar-chart { display: flex; align-items: flex-end; gap: 4px; height: 40px; margin-top: auto; margin-bottom: auto; }
 .bar-col { display: flex; flex-direction: column; align-items: center; flex: 1; gap: 2px; }
 .bar-fill { width: 100%; min-width: 16px; max-width: 48px; border-radius: 3px 3px 0 0; background: var(--c-accent); transition: height 0.4s ease; opacity: 0.6; }
 .bar-fill.fail-portion { background: var(--c-danger); opacity: 0.8; }
@@ -1663,7 +1663,7 @@ function showTaskDetail(taskId) {
   content.innerHTML = html;
 
   // Fetch full task data (for prompt + logs)
-  fetch('/api/tasks/' + t.id).then(r => r.json()).then(d => {
+  fetch('/api/tasks/' + t.id, {credentials:'include'}).then(r => r.json()).then(d => {
     if (!d.task) return;
     // Fill in the full prompt
     const promptEl = document.getElementById('ie-prompt-' + t.id);
@@ -1695,7 +1695,7 @@ function openEditModal(id) {
   const t = _tasks.find(x => x.id == id);
   if (!t) return;
   // Fetch full task data
-  fetch('/api/tasks/' + id).then(r => r.json()).then(d => {
+  fetch('/api/tasks/' + id, {credentials:'include'}).then(r => r.json()).then(d => {
     if (!d.task) return;
     const task = d.task;
     const terminal = new Set(['completed','failed','cancelled']);
@@ -1791,7 +1791,7 @@ async function dispatchSingle(id, btn) {
 
 async function escalateTask(id) {
   try {
-    const res = await fetch('/api/tasks/'+id+'/escalate', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({model:'opus'})});
+    const res = await fetch('/api/tasks/'+id+'/escalate', {method:'POST', credentials:'include', headers:{'Content-Type':'application/json'}, body:JSON.stringify({model:'opus'})});
     const d = await res.json();
     if (!d.ok) alert('Escalate failed: '+(d.error||''));
   } catch(e) { alert('Error: '+e); }
@@ -1800,7 +1800,7 @@ async function escalateTask(id) {
 async function requeueTask(id) {
   if (!confirm('Re-queue task #'+id+'?')) return;
   try {
-    const res = await fetch('/api/tasks/'+id+'/requeue', {method:'POST', headers:{'Content-Type':'application/json'}, body:'{}'});
+    const res = await fetch('/api/tasks/'+id+'/requeue', {method:'POST', credentials:'include', headers:{'Content-Type':'application/json'}, body:'{}'});
     const d = await res.json();
     if (!d.ok) alert('Requeue failed: '+(d.error||''));
   } catch(e) { alert('Error: '+e); }
@@ -1956,6 +1956,7 @@ async function submitNewTask() {
   try {
     const res = await fetch('/api/tasks/create', {
       method: 'POST',
+      credentials: 'include',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({repo, prompt, model, priority})
     });
