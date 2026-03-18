@@ -1,6 +1,6 @@
 # Backporcher
 
-![Backporcher Demo](resources/backporcher_demo.gif)
+![Backporcher Demo](backporcher_demo_v02.gif)
 
 A fully autonomous software engineering pipeline. Label a GitHub issue with `backporcher`, and in ~20 minutes you get a merged PR with tests passing and the issue closed. A real-time web dashboard lets you manage the fleet: approve or hold tasks before merge, pause/resume the dispatch queue, re-run failed agents, and monitor every stage of the pipeline from triage to merge.
 
