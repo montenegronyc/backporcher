@@ -534,6 +534,13 @@ You are a code review coordinator. Your job is to review a PR created by an auto
 ## PR Diff
 {pr_diff}
 
+## Blast Radius Analysis
+{blast_radius}
+
+The above shows which functions, classes, and tests are affected by this change,
+including indirect dependencies. Pay special attention to impacted code that was
+NOT modified — these are potential regression points.
+
 ## Other Open Backporcher PRs (same repo)
 {other_prs}
 
@@ -542,6 +549,7 @@ You are a code review coordinator. Your job is to review a PR created by an auto
 2. Are there obvious bugs, regressions, or security issues?
 3. Does it conflict with any of the other open PRs listed above?
 4. Is the scope appropriate (not too broad, not touching unrelated files)?
+5. Are there indirectly impacted functions/tests (from the blast radius) that might break?
 
 ## Your Response
 Analyze the PR, then end with exactly one of:
@@ -570,13 +578,34 @@ async def run_review(
 
     repo_full = repo_full_name_from_url(repo["github_url"])
 
-    # Gather context in parallel
-    diff_coro = get_pr_diff(repo_full, pr_number)
+    # Gather context in parallel (request full diff — graph handles smart truncation)
+    diff_coro = get_pr_diff(repo_full, pr_number, max_chars=0)
     prs_coro = list_open_prs(repo_full)
     pr_diff, open_prs = await asyncio.gather(diff_coro, prs_coro)
 
     if not pr_diff:
         return "reject", "Could not retrieve PR diff"
+
+    # Build blast radius context via code graph
+    blast_radius_text = "(dependency graph not available)"
+    repo_local_path = Path(repo["local_path"]) if repo.get("local_path") else None
+    if repo_local_path and repo_local_path.exists():
+        try:
+            from .graph.context import build_review_context, ensure_graph
+
+            store = await ensure_graph(repo_local_path)
+            if store:
+                try:
+                    pr_diff, blast_radius_text = build_review_context(
+                        store, pr_diff, repo_local_path
+                    )
+                finally:
+                    store.close()
+        except Exception:
+            log.exception("Graph context failed for task %d, falling back to raw diff", task["id"])
+            # Fallback: truncate diff the old way
+            if len(pr_diff) > 15000:
+                pr_diff = pr_diff[:15000] + "\n...(diff truncated at 15000 chars)..."
 
     # Format other open PRs (exclude this one)
     other_prs_lines = []
@@ -591,6 +620,7 @@ async def run_review(
     review_prompt = REVIEW_PROMPT_TEMPLATE.format(
         task_prompt=task["prompt"][:2000],
         pr_diff=pr_diff,
+        blast_radius=blast_radius_text,
         other_prs=other_prs_text,
     )
 

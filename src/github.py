@@ -383,8 +383,8 @@ async def get_ci_failure_logs(
     return out
 
 
-async def get_pr_diff(repo_full_name: str, pr_number: int) -> str:
-    """Get unified diff for a PR. Truncate to 15000 chars."""
+async def get_pr_diff(repo_full_name: str, pr_number: int, max_chars: int = 15000) -> str:
+    """Get unified diff for a PR. Truncate to max_chars (0 = no truncation)."""
     rc, out, err = await _run_gh(
         "pr",
         "diff",
@@ -397,8 +397,8 @@ async def get_pr_diff(repo_full_name: str, pr_number: int) -> str:
         log.error("Failed to get PR #%d diff: %s", pr_number, err.strip())
         return ""
 
-    if len(out) > 15000:
-        out = out[:15000] + "\n...(diff truncated at 15000 chars)..."
+    if max_chars and len(out) > max_chars:
+        out = out[:max_chars] + f"\n...(diff truncated at {max_chars} chars)..."
     return out
 
 
