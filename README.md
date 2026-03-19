@@ -10,7 +10,7 @@ Built in early 2026. 100% auto-merge rate on its first production run (15 PRs, z
 
 Most "AI coding" tools are glorified autocomplete. Backporcher is an **end-to-end pipeline**: it triages, plans dependencies, dispatches sandboxed agents, reviews their work with a coordinator agent, retries CI failures with error context, and merges, all autonomously.
 
-The key insight: treat agents like junior developers. Give them isolated worktrees, review their PRs, and let CI be the final gate. No magic, just good engineering around `claude -p`.
+The key insight: treat agents like junior developers. Give them isolated worktrees, review their PRs, and let CI be the final gate. But unlike junior developers, give them a **code-aware navigation map** so they don't waste time exploring the codebase, and feed them **learnings from every past success and failure** in that repo so they get better over time. No magic, just good engineering around `claude -p`.
 
 ## The Pipeline
 
@@ -183,17 +183,47 @@ This means a compromised or misbehaving agent can only damage the worktree it wa
 
 The coordinator review is **fail-open**: if the review agent errors out, the PR is auto-approved and CI becomes the sole gate. This is pragmatic for a solo operator (a stuck review shouldn't block the pipeline), but in a team context you'd want to flip this to fail-closed. A one-line change in `worker.py`.
 
-## Code Graph & Blast Radius
+## Agent Intelligence
 
-The coordinator doesn't just see the PR diff. Before every review, Backporcher builds (or incrementally updates) a per-repo code dependency graph using Tree-sitter AST parsing across 17 languages. A BFS traversal from changed files identifies indirectly impacted functions, classes, and tests, even if they weren't modified in the PR.
+Agents don't run blind. Backporcher builds a per-repo code dependency graph (Tree-sitter AST parsing across 17 languages, stored in SQLite, traversed via NetworkX BFS) and uses it at **two** points in the pipeline — once to help the agent navigate, and once to help the coordinator review.
 
-The coordinator prompt includes:
+### Navigation Context (before the agent starts)
+
+Before dispatching the work agent, a sonnet call queries the code graph with keywords extracted from the task prompt, walks 1-hop dependencies, and produces a focused navigation map: the 5-15 most relevant files, their key symbols, and a rationale for each. This gets injected into the agent's prompt so it starts with the right files open instead of spending tokens grepping around.
+
+The agent prompt is structured in layers, each adding context:
+1. **Project Context** — auto-detected tech stack (e.g., "Next.js 15 + TypeScript + Prisma + Jest")
+2. **Learnings** — outcomes from previous tasks in this repo (successes and failures)
+3. **Navigation Context** — graph-informed file map with symbols and rationale
+4. **Task** — the actual issue to implement
+5. **Execution Guidelines** — non-interactive agent rules
+
+### Blast Radius Analysis (after the PR is created)
+
+Before the coordinator reviews a PR, the graph runs a 2-hop BFS from changed files to identify indirectly impacted code:
 - **Directly changed** symbols (functions, classes) with file locations
 - **Indirectly impacted** code (callers, dependents, tests) that wasn't in the diff but could regress
 - **Key dependency edges** (CALLS, INHERITS, IMPORTS_FROM) connecting changed and impacted code
 - **Impacted files** not in the diff that have dependencies on changed code
 
-The graph persists per-repo at `{repo}/.code-review-graph/graph.db` (auto-gitignored). First build parses all files; subsequent reviews only re-parse changed files and their dependents. Falls back to raw diff truncation if graph build fails.
+### Learning Loop
+
+Every terminal task outcome gets recorded as a per-repo learning:
+- **Success**: what task prompt led to a clean merge
+- **Agent failure**: what prompt caused the agent to fail after retries
+- **Verify failure**: which build commands broke and why
+- **CI failure**: which checks failed after retries were exhausted
+- **Coordinator rejection**: what the reviewer flagged as wrong
+
+The last 10 learnings are injected into every new agent prompt for that repo. Over time, agents learn from their predecessors — they know which patterns work, which build commands are finicky, and which areas of the codebase are fragile.
+
+### Stack Detection
+
+On first contact with a repo, Backporcher auto-detects the tech stack by inspecting project files (`package.json`, `pyproject.toml`, `Cargo.toml`, etc.). The result (e.g., "Python + FastAPI + Alembic + pytest + Docker + GitHub Actions") is stored per-repo and included in every agent prompt, so the agent knows what tools and conventions to use without discovering them.
+
+### Graph Storage
+
+The graph persists per-repo at `{repo}/.code-review-graph/graph.db` (auto-gitignored). First build parses all source files (pre-built during preflight at daemon startup); subsequent dispatches/reviews use incremental updates that only re-parse changed files and their dependents. Falls back gracefully at every level — if the graph fails, agents still run.
 
 ## Self-Healing
 

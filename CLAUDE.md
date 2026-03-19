@@ -90,7 +90,7 @@ Controls how much human oversight the pipeline requires. Set via `BACKPORCHER_AP
 
 ## Database
 
-SQLite with WAL mode at `data/backporcher.db`. Schema version 7.
+SQLite with WAL mode at `data/backporcher.db`. Schema version 8.
 
 **Tables:** `repos` (with `verify_command`, `stack_info`), `tasks` (with `review_summary`, `pr_number`, `retry_count`, `priority`, `depends_on_task_id`, `hold`, `agent_started_at`, `agent_finished_at`, `model_used`, `initial_model`), `task_logs`, `metrics`, `repo_learnings`, `system_state`, `schema_version`
 
@@ -212,8 +212,9 @@ backporcher cleanup            # Remove worktrees for finished tasks
 backporcher cleanup <id>       # Remove specific task's worktree
 backporcher stats              # Pipeline performance stats
 backporcher repo add <url>     # Register a GitHub repo
-backporcher repo list          # List registered repos (shows verify command)
+backporcher repo list          # List registered repos (shows stack info + verify command)
 backporcher repo verify <name> <cmd>  # Set build verification command
+backporcher repo learnings <name>     # Show recorded learnings for a repo
 backporcher worker             # Run daemon foreground (for systemd)
 ```
 
@@ -235,19 +236,41 @@ backporcher worker             # Run daemon foreground (for systemd)
 | `FAIL` | failed |
 | ` CXL` | cancelled |
 
-## Navigation Context (Graph-Informed Agent Guidance)
+## Agent Intelligence Layer
 
-Before the work agent starts, a sonnet call queries the code dependency graph to build a navigation map of relevant files and symbols. This reduces token waste on codebase exploration.
+Agents receive a structured prompt with four layers of context, each building on the last. The code graph is used twice: once for agent navigation (pre-dispatch) and once for coordinator blast radius analysis (post-PR).
 
-**Flow:** `ensure_graph()` (pre-built in preflight) → `build_navigation_context()` (keyword extraction + graph search + 1-hop impact radius) → sonnet distills into focused file list → injected into agent prompt as `## Navigation Context`.
+### Structured Agent Prompt
 
-**Structured agent prompt:** `Project Context (stack) → Learnings → Navigation Context → Task → Execution Guidelines`
+```
+IMPORTANT: You are running non-interactively...
 
-**Graceful fallback:** If the graph doesn't exist, the navigation call fails, or sonnet returns invalid JSON, the agent runs without navigation context (same as before). Navigation never blocks dispatch.
+## Project Context               ← auto-detected tech stack (e.g. "Next.js 15 + TypeScript + Prisma")
+## Learnings from Previous Tasks  ← last 10 outcomes from this repo (successes + failures)
+## Navigation Context             ← sonnet-curated file map from code graph
+## Task                           ← the actual issue to implement
+## Execution Guidelines           ← non-interactive agent rules
+```
 
-**Cost:** ~$0.01 per task (2-3k input tokens, ~500 output tokens at sonnet pricing).
+### Stack Detection
 
-**Kill switch:** Set `BACKPORCHER_NAVIGATION_ENABLED=false` to disable.
+`detect_stack()` in dispatcher.py inspects project files (`package.json`, `pyproject.toml`, `Cargo.toml`, etc.) and stores the result in `repos.stack_info`. Runs during preflight and before each dispatch if not yet detected. Shows in `backporcher repo list`.
+
+### Learning Loop
+
+`record_learning()` captures outcomes at 5 terminal points: agent failure (retries exhausted), verify failure, coordinator rejection, CI failure (retries exhausted), and successful merge. `get_learnings_text()` formats the last 10 as a prompt section. Stored in `repo_learnings` table, queryable via `backporcher repo learnings <name>`.
+
+### Navigation Context
+
+Before the work agent starts, `generate_navigation_context()` in dispatcher.py:
+1. Calls `ensure_graph()` (pre-built in preflight, incremental update if already exists)
+2. Calls `build_navigation_context()` in graph/context.py — extracts keywords from task prompt, runs `search_nodes()` + `get_impact_radius(depth=1)` to find relevant files/symbols
+3. Calls sonnet (single-shot, 60s timeout) to distill raw graph data into a curated file map with rationale
+4. Formats into `## Navigation Context` section, capped at ~4k chars
+
+**Cost:** ~$0.01 per task. **Kill switch:** `BACKPORCHER_NAVIGATION_ENABLED=false`.
+
+**Graceful fallback:** If the graph doesn't exist, the graph query returns nothing, sonnet times out, or sonnet returns invalid JSON, the agent runs without navigation context. Navigation never blocks dispatch.
 
 ## Coordinator Review
 
