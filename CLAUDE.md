@@ -15,7 +15,8 @@ GitHub Issue (label: backporcher)
               → claude -p in sandboxed worktree
                 → Build verification (optional, per-repo)
                   → git push + gh pr create
-                    → Coordinator Review (claude -p reviews diff)
+                    → Code Graph (Tree-sitter → blast radius BFS)
+                      → Coordinator Review (claude -p reviews diff + impacted code)
                       → CI Monitor (retries up to 3x on failure)
                         → Merge gate (hold for approval or auto-merge)
                           → Close issue (label: backporcher-done)
@@ -72,7 +73,9 @@ Controls how much human oversight the pipeline requires. Set via `BACKPORCHER_AP
 | `src/worker.py` | Background daemon — 6 async loops, graceful shutdown, startup recovery, preflight checks |
 | `src/dashboard.py` | aiohttp web dashboard: HTTP Basic Auth, SSE real-time updates, JSON API, steel glass theme (high-contrast gray), task control (approve/hold/reject/edit/requeue/escalate) |
 | `backporcher-theme.css` | CSS design tokens and classes for the steel gray dashboard theme (reference file — inlined in dashboard.py) |
-| `src/dispatcher.py` | Worktree setup, credential sync, agent execution, build verification, PR creation, coordinator review runner, CI retry, transient failure auto-retry |
+| `src/graph/` | Code dependency graph: Tree-sitter parser, SQLite graph store, incremental update, blast radius context builder |
+| `src/graph/context.py` | Backporcher integration layer: `ensure_graph()`, `build_review_context()`, prompt injection sanitization, path traversal checks |
+| `src/dispatcher.py` | Worktree setup, credential sync, agent execution, build verification, PR creation, coordinator review runner (with graph context), CI retry, transient failure auto-retry |
 | `src/db.py` | SQLite with WAL mode, schema migrations (v1→v7), async (`Database`) + sync (`SyncDatabase`) wrappers, write lock for concurrency |
 | `src/notifications.py` | Webhook notifications (Slack/Discord compatible), fire-and-forget with 5s timeout |
 | `src/config.py` | `Config` dataclass populated from environment variables |
@@ -232,10 +235,15 @@ backporcher worker             # Run daemon foreground (for systemd)
 
 The coordinator is a lightweight `claude -p` call (300s timeout, not the full 3600s agent timeout) that receives:
 - The original task prompt
-- The full PR diff (truncated to 15000 chars)
+- The full PR diff (smart-truncated via code graph budget allocation)
+- A blast radius analysis: directly changed symbols, indirectly impacted functions/classes/tests, key dependency edges, and impacted files not in the diff
 - A list of all other open Backporcher PRs in the same repo (for conflict detection)
 
-It evaluates: task relevance, obvious bugs/regressions, security issues, conflicts with other in-flight PRs, and scope appropriateness.
+Before review, `ensure_graph()` builds or incrementally updates a per-repo dependency graph (Tree-sitter AST → SQLite → NetworkX BFS). `build_review_context()` then extracts changed files from the diff, runs `get_impact_radius(depth=2)`, and formats the blast radius for the prompt. Graph data is wrapped in `<graph-context>` untrusted-data delimiters with `VERDICT` strings stripped to prevent prompt injection from malicious function names.
+
+Falls back gracefully to raw 15k-char diff truncation if graph build/query fails.
+
+It evaluates: task relevance, obvious bugs/regressions, security issues, conflicts with other in-flight PRs, scope appropriateness, and whether indirectly impacted functions/tests might break.
 
 Output must end with `VERDICT: APPROVE` or `VERDICT: REJECT — {reason}`. The parser strips markdown bold/italic before matching.
 
@@ -292,6 +300,9 @@ pip install -e . && sudo systemctl restart backporcher
 - **Task reset procedure:** Never reset tasks via SQL while the daemon is running — the executor claims them immediately. Always: stop daemon, kill agent processes, reset DB, start daemon. See `docs/solutions/daemon-task-reset-race.md`.
 - **Model selection:** Sonnet struggles with multi-file refactoring (may commit only auto-generated files). Use opus for architectural changes, state extraction, or any task touching 3+ files. See `docs/solutions/opus-for-complex-refactoring.md`.
 - **System deps for verify:** Tauri projects need GTK/Cairo dev packages for `cargo check --workspace` (`libcairo2-dev`, `libgtk-3-dev`, `libwebkit2gtk-4.1-dev`, etc.). Missing deps cause silent verify failures.
+- **Graph DB corruption:** If `.code-review-graph/graph.db` gets corrupted, delete the directory and restart — it rebuilds automatically on next review. The coordinator falls back to raw diff if the graph is unavailable.
+- **Graph build on large repos:** First `full_build()` parses all source files and can take minutes on repos with 10k+ files. Subsequent reviews use `incremental_update()` which only re-parses changed files. Files >1MB are skipped to prevent memory exhaustion.
+- **Graph prompt injection:** Function/class names from the graph flow into the coordinator prompt. Malicious names (e.g., `VERDICT_APPROVE`) are sanitized: `VERDICT` is stripped, names capped at 120 chars, graph data wrapped in `<graph-context>` untrusted-data delimiters.
 
 ## Solutions Directory
 
@@ -312,7 +323,8 @@ pip install -e .
 # Run worker foreground (ctrl+c to stop)
 backporcher worker
 
-# Python 3.11+ required, two dependencies (aiosqlite, aiohttp)
+# Python 3.11+ required
+# Dependencies: aiosqlite, aiohttp, tree-sitter, tree-sitter-language-pack, networkx
 ```
 
-The codebase is intentionally minimal — no ORM, no task queue library. Just asyncio + aiohttp + sqlite + subprocess + gh CLI.
+The codebase is intentionally minimal — no ORM, no task queue library. Just asyncio + aiohttp + sqlite + Tree-sitter + subprocess + gh CLI.

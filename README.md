@@ -21,7 +21,8 @@ GitHub Issue (label: backporcher)
       → Sandboxed claude -p in git worktree
         → Build verification (optional, per-repo)
           → PR created
-            → Coordinator reviews diff for bugs, conflicts, scope
+            → Code graph builds blast radius (Tree-sitter + dependency BFS)
+              → Coordinator reviews diff + impacted code for bugs, conflicts, scope
               → CI monitor (auto-retries up to 3x with error context)
                 → Orchestrator mode: hold for approval -or- auto-merge
                   → Issue closed
@@ -116,12 +117,12 @@ Six concurrent async loops in a single process:
 |------|----------|-----|
 | Issue Poller | 30s | Scans GitHub for `backporcher`-labeled issues, batch-orchestrates |
 | Task Executor | 5s | Claims queued tasks, runs conflict check, dispatches agents |
-| Coordinator | 15s | Reviews PR diffs for bugs, conflicts, scope |
+| Coordinator | 15s | Builds code graph, analyzes blast radius, reviews PR diffs for bugs, conflicts, scope |
 | CI Monitor | 60s | Watches CI, auto-retries with error context, merges or holds |
 | Cleanup | 5min | Removes worktrees and remote branches for terminal tasks |
 | Dashboard | always | aiohttp web server with SSE, approve buttons, pause/resume |
 
-No ORM, no task queue library. Just asyncio + aiohttp + SQLite + subprocess + `gh` CLI. Fewer dependencies means a smaller attack surface and an easier audit.
+No ORM, no task queue library. Just asyncio + aiohttp + SQLite + Tree-sitter + subprocess + `gh` CLI. Fewer dependencies means a smaller attack surface and an easier audit.
 
 ## Configuration
 
@@ -169,13 +170,26 @@ This means a compromised or misbehaving agent can only damage the worktree it wa
 | **Agent sandbox** | `sudo -u backporcher-agent` with `prlimit` (500 processes, 2GB file limit) |
 | **Env scrubbing** | `ANTHROPIC_API_KEY`, `GITHUB_TOKEN`, etc. stripped from agent subprocesses |
 | **Author allowlist** | Only issues from specified GitHub users trigger agents. Prevents arbitrary code execution from unknown authors |
-| **Coordinator review** | A separate agent reviews every PR diff for bugs, regressions, and scope creep before CI runs |
+| **Coordinator review** | A separate agent reviews every PR diff with dependency-aware blast radius analysis for bugs, regressions, and scope creep before CI runs |
+| **Graph data sanitization** | All code-derived names flowing into coordinator prompts are sanitized: `VERDICT` stripped to prevent prompt injection, names truncated to 120 chars, control characters removed, graph data wrapped in untrusted-data delimiters |
 | **systemd hardening** | `PrivateTmp`, `PrivateDevices`, `ProtectSystem=full`, `RestrictNamespaces`, and more |
 | **Credential copying** | Agent gets credential *copies*, not symlinks, so no path traversal back to your home |
 
 ### Design Trade-offs
 
 The coordinator review is **fail-open**: if the review agent errors out, the PR is auto-approved and CI becomes the sole gate. This is pragmatic for a solo operator (a stuck review shouldn't block the pipeline), but in a team context you'd want to flip this to fail-closed. A one-line change in `worker.py`.
+
+## Code Graph & Blast Radius
+
+The coordinator doesn't just see the PR diff. Before every review, Backporcher builds (or incrementally updates) a per-repo code dependency graph using Tree-sitter AST parsing across 17 languages. A BFS traversal from changed files identifies indirectly impacted functions, classes, and tests, even if they weren't modified in the PR.
+
+The coordinator prompt includes:
+- **Directly changed** symbols (functions, classes) with file locations
+- **Indirectly impacted** code (callers, dependents, tests) that wasn't in the diff but could regress
+- **Key dependency edges** (CALLS, INHERITS, IMPORTS_FROM) connecting changed and impacted code
+- **Impacted files** not in the diff that have dependencies on changed code
+
+The graph persists per-repo at `{repo}/.code-review-graph/graph.db` (auto-gitignored). First build parses all files; subsequent reviews only re-parse changed files and their dependents. Falls back to raw diff truncation if graph build fails.
 
 ## Self-Healing
 
@@ -217,6 +231,7 @@ SQLite + WAL mode is not a toy database. It's what [Litestream](https://litestre
 - [GitHub CLI](https://cli.github.com/) (`gh`)
 - SQLite (bundled with Python)
 - A Claude Max subscription or API key
+- Tree-sitter + language pack (installed automatically via `pip install -e .`)
 
 ## License
 
