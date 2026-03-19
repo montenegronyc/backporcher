@@ -377,6 +377,10 @@ backporcher worker
 
 The codebase is intentionally minimal — no ORM, no task queue library. Just asyncio + aiohttp + sqlite + Tree-sitter + subprocess + gh CLI.
 
+## Linting
+
+**Always run `ruff check .` and `ruff format --check .` before committing.** Fix all issues before the commit — never push code that fails lint or format checks. Config is in `pyproject.toml`.
+
 ## Documentation Rules
 
 When committing and pushing changes that meaningfully affect project structure or functionality, always update both `README.md` and `CLAUDE.md` in the same commit. "Meaningful" means: new features, changed architecture, new config options, new CLI commands, changed file purposes, or new known gotchas. Cosmetic changes (formatting, typos, internal refactors with no API change) do not require doc updates.
