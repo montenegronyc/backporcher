@@ -206,17 +206,6 @@ Before the coordinator reviews a PR, the graph runs a 2-hop BFS from changed fil
 - **Key dependency edges** (CALLS, INHERITS, IMPORTS_FROM) connecting changed and impacted code
 - **Impacted files** not in the diff that have dependencies on changed code
 
-### Learning Loop
-
-Every terminal task outcome gets recorded as a per-repo learning:
-- **Success**: what task prompt led to a clean merge
-- **Agent failure**: what prompt caused the agent to fail after retries
-- **Verify failure**: which build commands broke and why
-- **CI failure**: which checks failed after retries were exhausted
-- **Coordinator rejection**: what the reviewer flagged as wrong
-
-The last 10 learnings are injected into every new agent prompt for that repo. Over time, agents learn from their predecessors — they know which patterns work, which build commands are finicky, and which areas of the codebase are fragile.
-
 ### Stack Detection
 
 On first contact with a repo, Backporcher auto-detects the tech stack by inspecting project files (`package.json`, `pyproject.toml`, `Cargo.toml`, etc.). The result (e.g., "Python + FastAPI + Alembic + pytest + Docker + GitHub Actions") is stored per-repo and included in every agent prompt, so the agent knows what tools and conventions to use without discovering them.
@@ -225,22 +214,35 @@ On first contact with a repo, Backporcher auto-detects the tech stack by inspect
 
 The graph persists per-repo at `{repo}/.code-review-graph/graph.db` (auto-gitignored). First build parses all source files (pre-built during preflight at daemon startup); subsequent dispatches/reviews use incremental updates that only re-parse changed files and their dependents. Falls back gracefully at every level — if the graph fails, agents still run.
 
-## Self-Healing
+## Self-Healing & Learning
 
-- Stale tasks recovered on restart (working → queued, reviewing → pr_created for re-review)
-- Credentials auto-synced when admin's are newer than agent's
-- Agent failures auto-retry with model escalation (sonnet → opus)
-- Merge conflicts detected and re-queued from fresh main
-- Task failure cascades recursively through dependency chains
-- Worktrees and remote branches cleaned up automatically
+Backporcher treats failure as data. When something goes wrong, the system both recovers immediately and remembers what happened so future tasks avoid the same pitfalls.
 
-## Smart Retry
+### Immediate Recovery
 
-When an agent fails, Backporcher doesn't just retry blindly:
+- **Crash recovery**: on restart, stale `working` tasks reset to `queued`, `reviewing` tasks reset to `pr_created` — no manual intervention
+- **Credential auto-sync**: before each dispatch, compares admin vs agent credential mtimes; auto-copies if admin's are newer
+- **Dependency cascades**: when a task fails, all queued tasks that depend on it (and their dependents) are automatically marked failed
+- **Artifact cleanup**: worktrees and remote branches are deleted on every terminal state; a periodic sweep catches stragglers
+
+### Smart Retry
+
+Retries aren't blind — each failure mode gets targeted recovery:
 - **Agent failure**: re-queues with model escalation (sonnet → opus after first failure)
-- **Build verification failure**: re-runs agent with error output as context
+- **Build verification failure**: re-runs agent with the error output as context
 - **CI failure**: fetches CI logs, re-runs agent with failure context
 - **Coordinator rejection**: closes PR, re-queues with reviewer feedback injected into prompt
+
+### Learning Loop
+
+Every terminal outcome — success or failure — gets recorded as a per-repo learning:
+- **Success**: what task prompt led to a clean merge
+- **Agent failure**: what prompt caused the agent to fail after retries
+- **Verify failure**: which build commands broke and why
+- **CI failure**: which checks failed after retries were exhausted
+- **Coordinator rejection**: what the reviewer flagged as wrong
+
+The last 10 learnings are injected into every new agent prompt for that repo. Agents learn from their predecessors — they know which patterns work, which build commands are finicky, and which areas of the codebase are fragile. The system gets better at each repo the more you use it, without configuration.
 
 ## Scaling Limits
 
