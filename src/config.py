@@ -19,7 +19,7 @@ class Config:
     allowed_models: tuple[str, ...] = ("sonnet", "opus", "haiku")
 
     task_timeout_seconds: int = 3600  # 1 hour hard kill
-    poll_interval_seconds: int = 30   # Issue polling interval
+    poll_interval_seconds: int = 30  # Issue polling interval
     allowed_git_hosts: tuple[str, ...] = ("github.com",)
 
     agent_user: str | None = None  # Run agents as this user via sudo -u
@@ -61,29 +61,17 @@ def load_config() -> Config:
 
     return Config(
         base_dir=base_dir,
-        db_path=Path(os.environ.get(
-            "BACKPORCHER_DB_PATH", str(base_dir / "data" / "backporcher.db")
-        )),
-        repos_dir=Path(os.environ.get(
-            "BACKPORCHER_REPOS_DIR", str(base_dir / "repos")
-        )),
-        logs_dir=Path(os.environ.get(
-            "BACKPORCHER_LOG_DIR", str(base_dir / "logs")
-        )),
+        db_path=Path(os.environ.get("BACKPORCHER_DB_PATH", str(base_dir / "data" / "backporcher.db"))),
+        repos_dir=Path(os.environ.get("BACKPORCHER_REPOS_DIR", str(base_dir / "repos"))),
+        logs_dir=Path(os.environ.get("BACKPORCHER_LOG_DIR", str(base_dir / "logs"))),
         max_workers=int(os.environ.get("BACKPORCHER_MAX_CONCURRENCY", "2")),
         default_model=os.environ.get("BACKPORCHER_DEFAULT_MODEL", "sonnet"),
-        task_timeout_seconds=int(
-            os.environ.get("BACKPORCHER_TASK_TIMEOUT", "3600")
-        ),
-        poll_interval_seconds=int(
-            os.environ.get("BACKPORCHER_POLL_INTERVAL", "30")
-        ),
+        task_timeout_seconds=int(os.environ.get("BACKPORCHER_TASK_TIMEOUT", "3600")),
+        poll_interval_seconds=int(os.environ.get("BACKPORCHER_POLL_INTERVAL", "30")),
         agent_user=os.environ.get("BACKPORCHER_AGENT_USER") or None,
         github_owner=os.environ.get("BACKPORCHER_GITHUB_OWNER", ""),
         max_ci_retries=int(os.environ.get("BACKPORCHER_MAX_CI_RETRIES", "3")),
-        ci_check_interval_seconds=int(
-            os.environ.get("BACKPORCHER_CI_CHECK_INTERVAL", "60")
-        ),
+        ci_check_interval_seconds=int(os.environ.get("BACKPORCHER_CI_CHECK_INTERVAL", "60")),
         allowed_github_users=allowed_users,
         coordinator_model=os.environ.get("BACKPORCHER_COORDINATOR_MODEL", "sonnet"),
         max_verify_retries=int(os.environ.get("BACKPORCHER_MAX_VERIFY_RETRIES", "2")),
@@ -94,8 +82,6 @@ def load_config() -> Config:
         dashboard_password=os.environ.get("BACKPORCHER_DASHBOARD_PASSWORD") or None,
         webhook_url=os.environ.get("BACKPORCHER_WEBHOOK_URL") or None,
         webhook_events=tuple(
-            e.strip() for e in
-            os.environ.get("BACKPORCHER_WEBHOOK_EVENTS", "hold,failed").split(",")
-            if e.strip()
+            e.strip() for e in os.environ.get("BACKPORCHER_WEBHOOK_EVENTS", "hold,failed").split(",") if e.strip()
         ),
     )

@@ -2,19 +2,39 @@
 
 import asyncio
 import logging
-import os
 import signal
 from datetime import datetime, timezone
 
 from .config import Config, load_config
 from .db import Database
-from .dispatcher import _mark_issue_failed, _pick_retry_model, check_task_conflict, cleanup_task_artifacts, clone_or_fetch, dispatch_task, orchestrate_batch, retry_with_ci_context, run_review, sync_agent_credentials, triage_issue
+from .dispatcher import (
+    _mark_issue_failed,
+    _pick_retry_model,
+    check_task_conflict,
+    cleanup_task_artifacts,
+    clone_or_fetch,
+    dispatch_task,
+    orchestrate_batch,
+    retry_with_ci_context,
+    run_review,
+    sync_agent_credentials,
+    triage_issue,
+)
 from .github import (
-    close_issue, close_pr, comment_on_issue, comment_on_pr,
-    ensure_labels, extract_pr_number_from_url, find_new_issues,
-    claim_issue, get_ci_failure_logs, get_pr_ci_status,
-    is_pr_conflicting, merge_pr,
-    repo_full_name_from_url, update_issue_labels,
+    claim_issue,
+    close_issue,
+    close_pr,
+    comment_on_issue,
+    comment_on_pr,
+    ensure_labels,
+    extract_pr_number_from_url,
+    find_new_issues,
+    get_ci_failure_logs,
+    get_pr_ci_status,
+    is_pr_conflicting,
+    merge_pr,
+    repo_full_name_from_url,
+    update_issue_labels,
 )
 
 log = logging.getLogger("backporcher.worker")
@@ -52,8 +72,7 @@ class WorkerDaemon:
         # Log tasks with holds so the user knows what's waiting
         held = await self.db.list_held_tasks()
         if held:
-            log.info("Tasks awaiting approval on startup: %s",
-                     ", ".join(f"#{t['id']}({t['hold']})" for t in held))
+            log.info("Tasks awaiting approval on startup: %s", ", ".join(f"#{t['id']}({t['hold']})" for t in held))
 
         loops = [
             self._issue_poller_loop(),
@@ -65,6 +84,7 @@ class WorkerDaemon:
 
         if self.config.dashboard_password:
             from .dashboard import start_dashboard
+
             loops.append(start_dashboard(self.db, self.config))
             log.info("Dashboard enabled on port %d", self.config.dashboard_port)
         else:
@@ -103,21 +123,33 @@ class WorkerDaemon:
                     # Process opus-labeled issues directly
                     for issue in opus_issues:
                         await self._create_task_for_issue(
-                            repo, repo_full, issue, "opus", "opus label (manual override)",
+                            repo,
+                            repo_full,
+                            issue,
+                            "opus",
+                            "opus label (manual override)",
                         )
 
                     # Normal issues: single = triage, 2+ = batch orchestrate
                     if len(normal_issues) == 1:
                         issue = normal_issues[0]
                         model, triage_reason = await triage_issue(
-                            issue.title, issue.body, self.config,
+                            issue.title,
+                            issue.body,
+                            self.config,
                         )
                         await self._create_task_for_issue(
-                            repo, repo_full, issue, model, triage_reason,
+                            repo,
+                            repo_full,
+                            issue,
+                            model,
+                            triage_reason,
                         )
                     elif len(normal_issues) >= 2:
                         await self._batch_create_tasks(
-                            repo, repo_full, normal_issues,
+                            repo,
+                            repo_full,
+                            normal_issues,
                         )
 
             except Exception:
@@ -126,8 +158,14 @@ class WorkerDaemon:
             await asyncio.sleep(self.config.poll_interval_seconds)
 
     async def _create_task_for_issue(
-        self, repo: dict, repo_full: str, issue, model: str, reason: str,
-        priority: int = 100, depends_on_task_id: int | None = None,
+        self,
+        repo: dict,
+        repo_full: str,
+        issue,
+        model: str,
+        reason: str,
+        priority: int = 100,
+        depends_on_task_id: int | None = None,
     ):
         """Create a single task from an issue and claim it on GitHub."""
         prompt = issue.title
@@ -135,8 +173,11 @@ class WorkerDaemon:
             prompt = f"{issue.title}\n\n{issue.body}"
 
         task_id = await self.db.create_task_from_issue(
-            repo["id"], prompt, model,
-            issue.number, issue.url,
+            repo["id"],
+            prompt,
+            model,
+            issue.number,
+            issue.url,
             priority=priority,
             depends_on_task_id=depends_on_task_id,
         )
@@ -151,7 +192,10 @@ class WorkerDaemon:
         )
         log.info(
             "Issue #%d -> Task #%d (pri=%d): %s",
-            issue.number, task_id, priority, issue.title[:60],
+            issue.number,
+            task_id,
+            priority,
+            issue.title[:60],
         )
         await claim_issue(repo_full, issue.number)
 
@@ -164,16 +208,17 @@ class WorkerDaemon:
         return task_id
 
     async def _batch_create_tasks(
-        self, repo: dict, repo_full: str, issues: list,
+        self,
+        repo: dict,
+        repo_full: str,
+        issues: list,
     ):
         """Batch-orchestrate multiple issues and create tasks with dependencies."""
-        issue_dicts = [
-            {"number": i.number, "title": i.title, "body": i.body}
-            for i in issues
-        ]
+        issue_dicts = [{"number": i.number, "title": i.title, "body": i.body} for i in issues]
         log.info(
             "Batch orchestrating %d issues for %s",
-            len(issues), repo["name"],
+            len(issues),
+            repo["name"],
         )
 
         plan = await orchestrate_batch(issue_dicts, repo["name"], self.config)
@@ -183,10 +228,16 @@ class WorkerDaemon:
             log.warning("Batch orchestration failed, falling back to individual triage")
             for issue in issues:
                 model, reason = await triage_issue(
-                    issue.title, issue.body, self.config,
+                    issue.title,
+                    issue.body,
+                    self.config,
                 )
                 await self._create_task_for_issue(
-                    repo, repo_full, issue, model, reason,
+                    repo,
+                    repo_full,
+                    issue,
+                    model,
+                    reason,
                 )
             return
 
@@ -211,11 +262,14 @@ class WorkerDaemon:
                 if dep_issue and not dep_task_id:
                     log.warning(
                         "Issue #%d depends on #%d but no task found (created yet?), ignoring dep",
-                        entry["issue_number"], dep_issue,
+                        entry["issue_number"],
+                        dep_issue,
                     )
 
             task_id = await self._create_task_for_issue(
-                repo, repo_full, issue,
+                repo,
+                repo_full,
+                issue,
                 model=entry["model"],
                 reason=entry["reason"],
                 priority=entry["priority"],
@@ -226,7 +280,10 @@ class WorkerDaemon:
             if dep_task_id:
                 log.info(
                     "Task #%d depends on task #%d (issue #%d -> #%d)",
-                    task_id, dep_task_id, entry["issue_number"], dep_issue,
+                    task_id,
+                    dep_task_id,
+                    entry["issue_number"],
+                    dep_issue,
                 )
 
     # --- Loop 2: Task Executor ---
@@ -253,10 +310,14 @@ class WorkerDaemon:
                                 dep_status = dep["status"] if dep else "missing"
                                 log.warning(
                                     "Task #%d claimed but dep #%d is '%s', re-queuing",
-                                    task["id"], dep_id, dep_status,
+                                    task["id"],
+                                    dep_id,
+                                    dep_status,
                                 )
                                 await self.db.update_task(
-                                    task["id"], status="queued", started_at=None,
+                                    task["id"],
+                                    status="queued",
+                                    started_at=None,
                                 )
                                 await asyncio.sleep(0.1)
                                 continue
@@ -268,7 +329,9 @@ class WorkerDaemon:
                             inflight = [t for t in inflight if t["id"] != task["id"]]
                             if inflight:
                                 conflict = await check_task_conflict(
-                                    task["prompt"], inflight, self.config,
+                                    task["prompt"],
+                                    inflight,
+                                    self.config,
                                 )
                                 if conflict:
                                     conflict_tid = conflict.get("conflicting_task_id")
@@ -287,7 +350,9 @@ class WorkerDaemon:
 
                                     log.info(
                                         "Task #%d conflicts with #%d (%s), serializing",
-                                        task["id"], dep_target, reason,
+                                        task["id"],
+                                        dep_target,
+                                        reason,
                                     )
                                     await self.db.update_task(
                                         task["id"],
@@ -304,11 +369,10 @@ class WorkerDaemon:
 
                         log.info(
                             "Claimed task #%d: %s",
-                            task["id"], task["prompt"][:80],
+                            task["id"],
+                            task["prompt"][:80],
                         )
-                        atask = asyncio.create_task(
-                            self._run_with_semaphore(task)
-                        )
+                        atask = asyncio.create_task(self._run_with_semaphore(task))
                         self._tasks.add(atask)
                         atask.add_done_callback(self._tasks.discard)
                         continue  # Check for more work immediately
@@ -412,7 +476,8 @@ class WorkerDaemon:
                         # Post review summary as PR comment
                         short_summary = summary[:1500] if len(summary) > 1500 else summary
                         await comment_on_pr(
-                            repo_full, pr_number,
+                            repo_full,
+                            pr_number,
                             f"**Coordinator Review: APPROVED**\n\n{short_summary}",
                         )
                     else:
@@ -467,13 +532,17 @@ class WorkerDaemon:
                             )
                             log.info(
                                 "Task #%d: coordinator rejected, retry %d/%d (model=%s)",
-                                task_id, new_count, self.config.max_task_retries, new_model,
+                                task_id,
+                                new_count,
+                                self.config.max_task_retries,
+                                new_model,
                             )
 
                             issue_num = task.get("github_issue_number")
                             if issue_num:
                                 await comment_on_issue(
-                                    repo_full, issue_num,
+                                    repo_full,
+                                    issue_num,
                                     f"PR rejected by coordinator. Retrying with {new_model} model "
                                     f"({new_count}/{self.config.max_task_retries})...\n\n"
                                     f"Feedback: {summary[:300]}",
@@ -486,7 +555,8 @@ class WorkerDaemon:
                             )
                             await close_pr(repo_full, pr_number, comment=reject_comment)
                             await self.db.update_task(
-                                task_id, status="failed",
+                                task_id,
+                                status="failed",
                                 error_message=f"Coordinator rejected (retries exhausted): {summary[:500]}",
                             )
 
@@ -497,12 +567,14 @@ class WorkerDaemon:
                             issue_num = task.get("github_issue_number")
                             if issue_num:
                                 await update_issue_labels(
-                                    repo_full, issue_num,
+                                    repo_full,
+                                    issue_num,
                                     add=["backporcher-failed"],
                                     remove=["backporcher-in-progress"],
                                 )
                                 await comment_on_issue(
-                                    repo_full, issue_num,
+                                    repo_full,
+                                    issue_num,
                                     f"PR was rejected by coordinator review (retries exhausted):\n\n{summary[:500]}\n\n"
                                     f"Re-add the `backporcher` label to retry.",
                                 )
@@ -510,8 +582,9 @@ class WorkerDaemon:
 
                             # Webhook: failed
                             from . import notifications as _notif
+
                             _title = task.get("prompt", "")[:80]
-                            await _notif.notify_failed(task_id, _title, f"coordinator rejected PR (retries exhausted)")
+                            await _notif.notify_failed(task_id, _title, "coordinator rejected PR (retries exhausted)")
 
             except Exception:
                 log.exception("Error in coordinator review loop")
@@ -537,8 +610,27 @@ class WorkerDaemon:
                     if ci.state == "pending":
                         continue  # Check next cycle
 
-                    if ci.state in ("success", "no_checks"):
+                    if ci.state == "success":
                         await self._handle_ci_passed(task, repo_full)
+
+                    elif ci.state == "no_checks":
+                        # No CI configured: block merge, log once
+                        task_id = task["id"]
+                        logs = await self.db.get_logs(task_id, limit=50)
+                        already_warned = any("no CI checks configured" in (entry.get("message", "")) for entry in logs)
+                        if not already_warned:
+                            await self.db.add_log(
+                                task_id,
+                                "No CI checks configured for this repo. "
+                                "PR blocked from auto-merge. Add a GitHub Actions "
+                                "workflow and push to trigger checks.",
+                                level="warn",
+                            )
+                            log.warning(
+                                "Task #%d: PR #%d has no CI checks, blocking merge",
+                                task_id,
+                                pr_number,
+                            )
 
                     elif ci.state == "failure":
                         await self._handle_ci_failure(task, repo_full, ci)
@@ -560,7 +652,8 @@ class WorkerDaemon:
                             level="warn",
                         )
                         await close_pr(
-                            repo_full, pr_number,
+                            repo_full,
+                            pr_number,
                             comment="Merge conflict detected. Closing PR and re-running agent from latest main.",
                         )
                         await self.db.update_task(
@@ -608,18 +701,23 @@ class WorkerDaemon:
         # Merge gate: in non-full-auto modes, hold for approval
         if self.config.approval_mode != "full-auto":
             await self.db.set_hold(task_id, "merge_approval")
-            await self.db.add_log(task_id, "Held for merge approval — run `backporcher approve %d` or use dashboard" % task_id)
+            await self.db.add_log(
+                task_id, "Held for merge approval — run `backporcher approve %d` or use dashboard" % task_id
+            )
             log.info("Task #%d: held for merge approval", task_id)
             # Post PR comment
             if pr_number:
                 from .github import comment_on_pr as _comment_on_pr
+
                 await _comment_on_pr(
-                    repo_full, pr_number,
+                    repo_full,
+                    pr_number,
                     f"CI passed. Awaiting merge approval.\n\n"
                     f"Run `backporcher approve {task_id}` or use the dashboard to merge.",
                 )
             # Webhook notification
             from . import notifications
+
             title = task.get("prompt", "")[:80]
             await notifications.notify_hold(task_id, title, "merge_approval")
             return
@@ -638,8 +736,11 @@ class WorkerDaemon:
                     merge_duration = self._compute_duration(task.get("created_at"), now)
                     model = task.get("model_used") or task.get("model")
                     await self.db.record_metric(
-                        "merge", task_id=task_id, repo=task.get("repo_name"),
-                        model=model, value=merge_duration,
+                        "merge",
+                        task_id=task_id,
+                        repo=task.get("repo_name"),
+                        model=model,
+                        value=merge_duration,
                     )
                 except Exception:
                     log.warning("Failed to record merge metric for task %d", task_id, exc_info=True)
@@ -647,12 +748,14 @@ class WorkerDaemon:
                 issue_num = task.get("github_issue_number")
                 if issue_num:
                     await update_issue_labels(
-                        repo_full, issue_num,
+                        repo_full,
+                        issue_num,
                         add=["backporcher-done"],
                         remove=["backporcher-in-progress"],
                     )
                     await comment_on_issue(
-                        repo_full, issue_num,
+                        repo_full,
+                        issue_num,
                         "CI passed. PR has been merged. Closing issue.",
                     )
                     await close_issue(repo_full, issue_num)
@@ -660,6 +763,7 @@ class WorkerDaemon:
 
                 # Webhook: completed
                 from . import notifications
+
                 title = task.get("prompt", "")[:80]
                 dur = self._compute_duration(task.get("created_at"), now)
                 dur_str = f"{int(dur // 60)}m" if dur else "?"
@@ -677,7 +781,8 @@ class WorkerDaemon:
                 )
                 log.warning("Task #%d: PR #%d has merge conflicts, re-queuing", task_id, pr_number)
                 await close_pr(
-                    repo_full, pr_number,
+                    repo_full,
+                    pr_number,
                     comment="Merge conflict detected. Closing PR and re-running agent from latest main.",
                 )
                 await self.db.update_task(
@@ -693,7 +798,8 @@ class WorkerDaemon:
                 )
             else:
                 await self.db.update_task(
-                    task_id, status="failed",
+                    task_id,
+                    status="failed",
                     error_message=f"Merge failed for PR #{pr_number} (no conflict detected)",
                 )
                 await self.db.add_log(task_id, f"Failed to merge PR #{pr_number} (no conflict)", level="error")
@@ -702,12 +808,14 @@ class WorkerDaemon:
                 issue_num = task.get("github_issue_number")
                 if issue_num:
                     await update_issue_labels(
-                        repo_full, issue_num,
+                        repo_full,
+                        issue_num,
                         add=["backporcher-failed"],
                         remove=["backporcher-in-progress"],
                     )
                     await comment_on_issue(
-                        repo_full, issue_num,
+                        repo_full,
+                        issue_num,
                         f"Merge failed for PR #{pr_number} (reason unknown, not a conflict).\n\n"
                         f"Re-add the `backporcher` label to retry.",
                     )
@@ -733,8 +841,11 @@ class WorkerDaemon:
                 merge_duration = self._compute_duration(task.get("created_at"), now)
                 model = task.get("model_used") or task.get("model")
                 await self.db.record_metric(
-                    "merge", task_id=task_id, repo=task.get("repo_name"),
-                    model=model, value=merge_duration,
+                    "merge",
+                    task_id=task_id,
+                    repo=task.get("repo_name"),
+                    model=model,
+                    value=merge_duration,
                 )
             except Exception:
                 log.warning("Failed to record merge metric for task %d", task_id, exc_info=True)
@@ -742,12 +853,14 @@ class WorkerDaemon:
             issue_num = task.get("github_issue_number")
             if issue_num:
                 await update_issue_labels(
-                    repo_full, issue_num,
+                    repo_full,
+                    issue_num,
                     add=["backporcher-done"],
                     remove=["backporcher-in-progress"],
                 )
                 await comment_on_issue(
-                    repo_full, issue_num,
+                    repo_full,
+                    issue_num,
                     "CI passed. PR has been merged. Closing issue.",
                 )
                 await close_issue(repo_full, issue_num)
@@ -755,6 +868,7 @@ class WorkerDaemon:
 
             # Webhook: completed
             from . import notifications
+
             title = task.get("prompt", "")[:80]
             dur = self._compute_duration(task.get("created_at"), now)
             dur_str = f"{int(dur // 60)}m" if dur else "?"
@@ -772,7 +886,8 @@ class WorkerDaemon:
             )
             log.warning("Task #%d: PR #%d has merge conflicts, re-queuing", task_id, pr_number)
             await close_pr(
-                repo_full, pr_number,
+                repo_full,
+                pr_number,
                 comment="Merge conflict detected. Closing PR and re-running agent from latest main.",
             )
             await self.db.update_task(
@@ -789,7 +904,8 @@ class WorkerDaemon:
             )
         else:
             await self.db.update_task(
-                task_id, status="failed",
+                task_id,
+                status="failed",
                 error_message=f"Merge failed for PR #{pr_number} (no conflict detected)",
             )
             await self.db.add_log(task_id, f"Failed to merge PR #{pr_number} (no conflict)", level="error")
@@ -797,12 +913,14 @@ class WorkerDaemon:
             issue_num = task.get("github_issue_number")
             if issue_num:
                 await update_issue_labels(
-                    repo_full, issue_num,
+                    repo_full,
+                    issue_num,
                     add=["backporcher-failed"],
                     remove=["backporcher-in-progress"],
                 )
                 await comment_on_issue(
-                    repo_full, issue_num,
+                    repo_full,
+                    issue_num,
                     f"Merge failed for PR #{pr_number} (reason unknown, not a conflict).\n\n"
                     f"Re-add the `backporcher` label to retry.",
                 )
@@ -816,24 +934,28 @@ class WorkerDaemon:
         if retry_count < self.config.max_ci_retries:
             new_count = retry_count + 1
             await self.db.update_task(
-                task_id, status="retrying", retry_count=new_count,
+                task_id,
+                status="retrying",
+                retry_count=new_count,
             )
             await self.db.add_log(
                 task_id,
-                f"CI failed ({', '.join(ci.failed_checks[:3])}). "
-                f"Retry {new_count}/{self.config.max_ci_retries}",
+                f"CI failed ({', '.join(ci.failed_checks[:3])}). Retry {new_count}/{self.config.max_ci_retries}",
                 level="warn",
             )
             log.info("Task #%d: CI failed, retry %d/%d", task_id, new_count, self.config.max_ci_retries)
             await self.db.record_metric(
-                "retry_ci", task_id=task_id, repo=task.get("repo_name"),
+                "retry_ci",
+                task_id=task_id,
+                repo=task.get("repo_name"),
                 model=task.get("model"),
             )
 
             issue_num = task.get("github_issue_number")
             if issue_num:
                 await comment_on_issue(
-                    repo_full, issue_num,
+                    repo_full,
+                    issue_num,
                     f"CI failed: {', '.join(ci.failed_checks[:3])}\n\n"
                     f"Auto-retrying ({new_count}/{self.config.max_ci_retries})...",
                 )
@@ -849,12 +971,14 @@ class WorkerDaemon:
             issue_num = task.get("github_issue_number")
             if issue_num:
                 await update_issue_labels(
-                    repo_full, issue_num,
+                    repo_full,
+                    issue_num,
                     add=["backporcher-failed"],
                     remove=["backporcher-in-progress"],
                 )
                 await comment_on_issue(
-                    repo_full, issue_num,
+                    repo_full,
+                    issue_num,
                     f"CI failed after {self.config.max_ci_retries} retries. "
                     f"Failed checks: {', '.join(ci.failed_checks[:5])}\n\n"
                     f"Marking as failed. Re-add the `backporcher` label to retry.",
@@ -863,6 +987,7 @@ class WorkerDaemon:
 
             # Webhook: failed
             from . import notifications
+
             title = task.get("prompt", "")[:80]
             await notifications.notify_failed(task_id, title, f"CI failed after {self.config.max_ci_retries} retries")
 
@@ -886,12 +1011,14 @@ class WorkerDaemon:
         except Exception as e:
             log.exception("Retry failed for task %d", task_id)
             await self.db.update_task(
-                task_id, status="failed",
+                task_id,
+                status="failed",
                 error_message=f"Retry error: {str(e)[:500]}",
             )
             await self.db.add_log(task_id, f"Retry error: {e}", level="error")
             await _mark_issue_failed(
-                task, self.db,
+                task,
+                self.db,
                 f"CI retry failed with error: {str(e)[:300]}",
             )
             await cleanup_task_artifacts(task, self.db)
@@ -917,7 +1044,8 @@ class WorkerDaemon:
                         await cleanup_task_artifacts(task, self.db)
                     except Exception:
                         log.exception(
-                            "Cleanup failed for task #%d", task["id"],
+                            "Cleanup failed for task #%d",
+                            task["id"],
                         )
             except Exception:
                 log.exception("Error in cleanup loop")
@@ -959,8 +1087,7 @@ async def _run_worker():
     async with db._write_lock:
         # Reviewing → pr_created (re-review)
         async with db.db.execute(
-            "UPDATE tasks SET status = 'pr_created', review_summary = NULL "
-            "WHERE status = 'reviewing' RETURNING id"
+            "UPDATE tasks SET status = 'pr_created', review_summary = NULL WHERE status = 'reviewing' RETURNING id"
         ) as cur:
             recovered_reviewing = [r[0] for r in await cur.fetchall()]
         # Working → queued (re-dispatch)
@@ -998,7 +1125,12 @@ async def _run_worker():
     # Check agent user can access repos
     if config.agent_user:
         proc = await asyncio.create_subprocess_exec(
-            "sudo", "-u", config.agent_user, "test", "-r", str(config.repos_dir),
+            "sudo",
+            "-u",
+            config.agent_user,
+            "test",
+            "-r",
+            str(config.repos_dir),
             stdout=asyncio.subprocess.DEVNULL,
             stderr=asyncio.subprocess.DEVNULL,
         )
@@ -1017,6 +1149,7 @@ async def _run_worker():
 
     # Initialize webhook notifications
     from . import notifications
+
     notifications.init(config)
     if config.webhook_url:
         log.info("Webhooks enabled: %s (events: %s)", config.webhook_url, ",".join(config.webhook_events))

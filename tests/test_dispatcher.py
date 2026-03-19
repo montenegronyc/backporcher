@@ -1,11 +1,12 @@
 """Tests for dispatcher.py — URL validation, branch names, PR body."""
 
 import pytest
-from unittest.mock import patch
 
 from src.config import Config
 from src.dispatcher import (
-    validate_github_url, repo_name_from_url, make_branch_name,
+    make_branch_name,
+    repo_name_from_url,
+    validate_github_url,
 )
 
 

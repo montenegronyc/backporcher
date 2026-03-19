@@ -6,7 +6,6 @@ import json
 import logging
 import os
 import secrets
-import signal
 import sys
 from datetime import datetime, timezone
 
@@ -50,6 +49,7 @@ async def _start_worker(config: Config):
 
     # Use the installed CLI entry point, or fall back to python -m
     import shutil
+
     worker_cmd = shutil.which("backporcher")
     if worker_cmd:
         cmd = [worker_cmd, "worker"]
@@ -119,6 +119,7 @@ async def _stop_worker():
     _worker_proc = None
     return True, f"Worker stopped (pid={pid})"
 
+
 # Status badge mapping (matches CLI fleet command)
 BADGE = {
     "queued": "WAIT",
@@ -162,6 +163,7 @@ def _check_auth(request: web.Request, password: str) -> bool:
 
 def auth_middleware(password: str | None):
     """Create auth middleware. If no password, dashboard is disabled (caller checks)."""
+
     @web.middleware
     async def middleware(request: web.Request, handler):
         if password and not _check_auth(request, password):
@@ -171,6 +173,7 @@ def auth_middleware(password: str | None):
                 text="Unauthorized",
             )
         return await handler(request)
+
     return middleware
 
 
@@ -243,8 +246,9 @@ async def _build_status(db: Database) -> dict:
 async def index_handler(request: web.Request) -> web.Response:
     """Serve the main dashboard HTML page."""
     return web.Response(
-        text=DASHBOARD_HTML, content_type="text/html",
-        headers={"Cache-Control": "no-cache, no-store, must-revalidate", "Pragma": "no-cache"}
+        text=DASHBOARD_HTML,
+        content_type="text/html",
+        headers={"Cache-Control": "no-cache, no-store, must-revalidate", "Pragma": "no-cache"},
     )
 
 
@@ -2148,13 +2152,12 @@ async def stats_handler(request: web.Request) -> web.Response:
 
     # Escalations
     escalations = sum(
-        1 for t in tasks
-        if t.get("initial_model") and t.get("model_used")
-        and t["initial_model"] != t["model_used"]
+        1 for t in tasks if t.get("initial_model") and t.get("model_used") and t["initial_model"] != t["model_used"]
     )
 
     # Last 7 days
     from datetime import timedelta
+
     seven_ago = now - timedelta(days=7)
     recent = [t for t in tasks if (_parse_iso(t["created_at"]) or now) >= seven_ago]
     recent_completed = [t for t in recent if t["status"] == "completed"]
@@ -2176,25 +2179,29 @@ async def stats_handler(request: web.Request) -> web.Response:
         if t["status"] == "failed":
             repo_stats[rn]["failed"] += 1
 
-    return web.json_response({"stats": {
-        "total": total,
-        "completed": n_completed,
-        "failed": n_failed,
-        "pct_completed": round(n_completed / total * 100, 1) if total else 0,
-        "pct_failed": round(n_failed / total * 100, 1) if total else 0,
-        "avg_merge_seconds": round(avg_merge) if avg_merge else None,
-        "avg_agent_seconds": round(avg_agent) if avg_agent else None,
-        "total_retries": total_retries,
-        "retry_rate": round(retry_rate, 1),
-        "models": model_counts,
-        "escalations": escalations,
-        "recent_7d": {
-            "completed": len(recent_completed),
-            "failed": len(recent_failed),
-            "avg_merge_seconds": round(recent_avg_merge) if recent_avg_merge else None,
-        },
-        "repos": repo_stats,
-    }})
+    return web.json_response(
+        {
+            "stats": {
+                "total": total,
+                "completed": n_completed,
+                "failed": n_failed,
+                "pct_completed": round(n_completed / total * 100, 1) if total else 0,
+                "pct_failed": round(n_failed / total * 100, 1) if total else 0,
+                "avg_merge_seconds": round(avg_merge) if avg_merge else None,
+                "avg_agent_seconds": round(avg_agent) if avg_agent else None,
+                "total_retries": total_retries,
+                "retry_rate": round(retry_rate, 1),
+                "models": model_counts,
+                "escalations": escalations,
+                "recent_7d": {
+                    "completed": len(recent_completed),
+                    "failed": len(recent_failed),
+                    "avg_merge_seconds": round(recent_avg_merge) if recent_avg_merge else None,
+                },
+                "repos": repo_stats,
+            }
+        }
+    )
 
 
 async def edit_task_handler(request: web.Request) -> web.Response:
@@ -2213,10 +2220,10 @@ async def edit_task_handler(request: web.Request) -> web.Response:
     editable_statuses = {"queued", "failed"}
     has_hold = bool(task.get("hold"))
     if task["status"] not in editable_statuses and not has_hold:
-        return web.json_response({
-            "ok": False,
-            "error": f"cannot edit task in status={task['status']} (must be queued, failed, or held)"
-        }, status=400)
+        return web.json_response(
+            {"ok": False, "error": f"cannot edit task in status={task['status']} (must be queued, failed, or held)"},
+            status=400,
+        )
 
     try:
         body = await request.json()
@@ -2250,13 +2257,26 @@ async def edit_task_handler(request: web.Request) -> web.Response:
         updates["review_summary"] = None
 
     await db.update_task(task_id, **updates)
-    action_desc = ", ".join(f"{k}={v!r:.60}" for k, v in updates.items() if k not in (
-        "error_message", "started_at", "completed_at", "branch_name",
-        "worktree_path", "pr_url", "pr_number", "review_summary",
-    ))
+    action_desc = ", ".join(
+        f"{k}={v!r:.60}"
+        for k, v in updates.items()
+        if k
+        not in (
+            "error_message",
+            "started_at",
+            "completed_at",
+            "branch_name",
+            "worktree_path",
+            "pr_url",
+            "pr_number",
+            "review_summary",
+        )
+    )
     await db.add_log(task_id, f"Edited via dashboard: {action_desc}")
 
-    return web.json_response({"ok": True, "task_id": task_id, "action": "edit", "updates": {k: str(v)[:100] for k, v in updates.items()}})
+    return web.json_response(
+        {"ok": True, "task_id": task_id, "action": "edit", "updates": {k: str(v)[:100] for k, v in updates.items()}}
+    )
 
 
 async def requeue_task_handler(request: web.Request) -> web.Response:
@@ -2273,10 +2293,13 @@ async def requeue_task_handler(request: web.Request) -> web.Response:
 
     requeueable = {"failed", "completed", "cancelled"}
     if task["status"] not in requeueable:
-        return web.json_response({
-            "ok": False,
-            "error": f"cannot requeue task in status={task['status']} (must be failed, completed, or cancelled)"
-        }, status=400)
+        return web.json_response(
+            {
+                "ok": False,
+                "error": f"cannot requeue task in status={task['status']} (must be failed, completed, or cancelled)",
+            },
+            status=400,
+        )
 
     try:
         body = await request.json()
@@ -2326,10 +2349,10 @@ async def escalate_task_handler(request: web.Request) -> web.Response:
         return web.json_response({"ok": False, "error": "not found"}, status=404)
 
     if task["status"] not in ("queued", "working"):
-        return web.json_response({
-            "ok": False,
-            "error": f"cannot escalate task in status={task['status']} (must be queued or working)"
-        }, status=400)
+        return web.json_response(
+            {"ok": False, "error": f"cannot escalate task in status={task['status']} (must be queued or working)"},
+            status=400,
+        )
 
     try:
         body = await request.json()
@@ -2347,7 +2370,9 @@ async def escalate_task_handler(request: web.Request) -> web.Response:
     await db.update_task(task_id, model=target_model)
     await db.add_log(task_id, f"Model escalated: {old_model} -> {target_model} via dashboard")
 
-    return web.json_response({"ok": True, "task_id": task_id, "action": "escalate", "from": old_model, "to": target_model})
+    return web.json_response(
+        {"ok": True, "task_id": task_id, "action": "escalate", "from": old_model, "to": target_model}
+    )
 
 
 async def approve_handler(request: web.Request) -> web.Response:
@@ -2373,7 +2398,9 @@ async def hold_handler(request: web.Request) -> web.Response:
     if not task:
         return web.json_response({"ok": False, "error": "not found"}, status=404)
     if task["status"] in ("completed", "failed", "cancelled"):
-        return web.json_response({"ok": False, "error": f"cannot hold terminal task (status={task['status']})"}, status=400)
+        return web.json_response(
+            {"ok": False, "error": f"cannot hold terminal task (status={task['status']})"}, status=400
+        )
     if task.get("hold"):
         return web.json_response({"ok": False, "error": f"task already has hold: {task['hold']}"}, status=400)
 
@@ -2422,11 +2449,23 @@ async def reject_handler(request: web.Request) -> web.Response:
         repo = await db.get_repo(task["repo_id"])
         if repo:
             import subprocess
+
             from .github import repo_full_name_from_url
+
             repo_full = repo_full_name_from_url(repo["github_url"])
             subprocess.run(
-                ["gh", "issue", "edit", "--repo", repo_full, str(issue_num),
-                 "--add-label", "backporcher", "--remove-label", "backporcher-in-progress"],
+                [
+                    "gh",
+                    "issue",
+                    "edit",
+                    "--repo",
+                    repo_full,
+                    str(issue_num),
+                    "--add-label",
+                    "backporcher",
+                    "--remove-label",
+                    "backporcher-in-progress",
+                ],
                 capture_output=True,
             )
 
@@ -2452,17 +2491,30 @@ async def dispatch_single_handler(request: web.Request) -> web.Response:
 
         # Allow dispatching queued or failed tasks
         if task["status"] not in ("queued", "failed"):
-            return web.json_response({"ok": False, "error": f"cannot dispatch task in status={task['status']}"}, status=400)
+            return web.json_response(
+                {"ok": False, "error": f"cannot dispatch task in status={task['status']}"}, status=400
+            )
 
         # If failed, reset to queued first
         if task["status"] == "failed":
             now = datetime.now(timezone.utc).isoformat()
-            await db.update_task(task_id,
-                status="queued", error_message=None, started_at=None,
-                completed_at=None, branch_name=None, worktree_path=None,
-                pr_url=None, pr_number=None, review_summary=None,
-                exit_code=None, agent_pid=None, output_summary=None, hold=None,
-                agent_started_at=None, agent_finished_at=None,
+            await db.update_task(
+                task_id,
+                status="queued",
+                error_message=None,
+                started_at=None,
+                completed_at=None,
+                branch_name=None,
+                worktree_path=None,
+                pr_url=None,
+                pr_number=None,
+                review_summary=None,
+                exit_code=None,
+                agent_pid=None,
+                output_summary=None,
+                hold=None,
+                agent_started_at=None,
+                agent_finished_at=None,
             )
             await db.add_log(task_id, "Reset to queued for single dispatch via dashboard")
 
@@ -2477,14 +2529,19 @@ async def dispatch_single_handler(request: web.Request) -> web.Response:
         async def _run():
             try:
                 from .dispatcher import dispatch_task
+
                 fresh = await db.get_task(task_id)
                 if fresh:
                     await dispatch_task(fresh, config, db)
             except Exception:
                 log.exception("Single dispatch failed for task %d", task_id)
                 try:
-                    await db.update_task(task_id, status="failed",
-                        error_message="Single dispatch error", completed_at=datetime.now(timezone.utc).isoformat())
+                    await db.update_task(
+                        task_id,
+                        status="failed",
+                        error_message="Single dispatch error",
+                        completed_at=datetime.now(timezone.utc).isoformat(),
+                    )
                     await db.add_log(task_id, "Single dispatch failed", level="error")
                 except Exception:
                     pass
@@ -2551,11 +2608,13 @@ async def worker_status_handler(request: web.Request) -> web.Response:
     """Worker status and recent log lines."""
     alive = _is_worker_alive()
     pid = _worker_proc.pid if _worker_proc and alive else None
-    return web.json_response({
-        "running": alive,
-        "pid": pid,
-        "log": _worker_log_lines[-50:],
-    })
+    return web.json_response(
+        {
+            "running": alive,
+            "pid": pid,
+            "log": _worker_log_lines[-50:],
+        }
+    )
 
 
 async def pause_handler(request: web.Request) -> web.Response:
@@ -2566,6 +2625,7 @@ async def pause_handler(request: web.Request) -> web.Response:
     # Webhook: paused
     try:
         from . import notifications
+
         active = await db.count_active()
         queued = await db.count_queued()
         await notifications.notify_paused(active, queued)

@@ -9,7 +9,8 @@ def backporcher(*args):
     """Run backporcher CLI and return (returncode, stdout, stderr)."""
     result = subprocess.run(
         [sys.executable, "-m", "src.cli", *args],
-        capture_output=True, text=True,
+        capture_output=True,
+        text=True,
         cwd=str(Path(__file__).resolve().parent.parent),
     )
     return result.returncode, result.stdout, result.stderr

@@ -3,8 +3,10 @@
 import pytest
 
 from src.github import (
-    CIStatus, GitHubIssue,
-    repo_full_name_from_url, extract_pr_number_from_url,
+    CIStatus,
+    GitHubIssue,
+    extract_pr_number_from_url,
+    repo_full_name_from_url,
 )
 
 
@@ -63,9 +65,12 @@ class TestCIStatus:
 class TestGitHubIssue:
     def test_construction(self):
         issue = GitHubIssue(
-            number=1, title="Fix bug", body="Details here",
+            number=1,
+            title="Fix bug",
+            body="Details here",
             url="https://github.com/o/r/issues/1",
-            author="testuser", labels=["backporcher"],
+            author="testuser",
+            labels=["backporcher"],
         )
         assert issue.number == 1
         assert issue.author == "testuser"

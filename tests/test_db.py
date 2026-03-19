@@ -1,17 +1,15 @@
 """Tests for database layer — schema migration, CRUD, new methods."""
 
-import asyncio
 import sqlite3
-import tempfile
 from pathlib import Path
 
 import pytest
 import pytest_asyncio
 
-from src.db import Database, SyncDatabase, _migrate_sync, _get_schema_version, SCHEMA_V1
-
+from src.db import SCHEMA_V1, Database, SyncDatabase, _get_schema_version
 
 # --- Helpers ---
+
 
 def make_v1_db(path: Path):
     """Create a v1 database (original schema, no schema_version table)."""
@@ -38,6 +36,7 @@ def make_v1_db(path: Path):
 
 
 # --- Schema Migration Tests ---
+
 
 class TestSchemaMigration:
     def test_fresh_database(self, tmp_path):
@@ -151,6 +150,7 @@ class TestSchemaMigration:
 
 # --- SyncDatabase CRUD Tests ---
 
+
 class TestSyncDatabase:
     @pytest.fixture
     def db(self, tmp_path):
@@ -255,6 +255,7 @@ class TestSyncDatabase:
 
 # --- Async Database Tests ---
 
+
 class TestAsyncDatabase:
     @pytest_asyncio.fixture
     async def db(self, tmp_path):
@@ -267,7 +268,11 @@ class TestAsyncDatabase:
     async def test_create_task_from_issue(self, db):
         await db.add_repo("r", "https://github.com/t/r", "/tmp/r")
         tid = await db.create_task_from_issue(
-            1, "fix the bug", "sonnet", 42, "https://github.com/t/r/issues/42",
+            1,
+            "fix the bug",
+            "sonnet",
+            42,
+            "https://github.com/t/r/issues/42",
         )
         task = await db.get_task(tid)
         assert task["github_issue_number"] == 42

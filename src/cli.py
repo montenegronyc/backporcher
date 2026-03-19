@@ -10,7 +10,7 @@ from pathlib import Path
 
 from .config import load_config
 from .db import SyncDatabase
-from .dispatcher import validate_github_url, repo_name_from_url
+from .dispatcher import repo_name_from_url, validate_github_url
 
 
 def get_db() -> SyncDatabase:
@@ -21,6 +21,7 @@ def get_db() -> SyncDatabase:
 
 
 # --- repo commands ---
+
 
 def cmd_repo_add(args):
     config = load_config()
@@ -73,6 +74,7 @@ def cmd_repo_verify(args):
 
 
 # --- fleet ---
+
 
 def cmd_fleet(args):
     """Dashboard showing all active work across the fleet."""
@@ -154,6 +156,7 @@ def cmd_fleet(args):
 
 # --- status ---
 
+
 def cmd_status(args):
     db = get_db()
 
@@ -196,7 +199,11 @@ def cmd_status(args):
         if logs:
             print(f"\n  --- Last {len(logs)} log entries ---")
             for entry in logs:
-                ts = entry["created_at"].split("T")[-1].split(".")[0] if "T" in entry["created_at"] else entry["created_at"][-8:]
+                ts = (
+                    entry["created_at"].split("T")[-1].split(".")[0]
+                    if "T" in entry["created_at"]
+                    else entry["created_at"][-8:]
+                )
                 lvl = entry["level"].upper()[:4]
                 print(f"  {ts} [{lvl}] {entry['message'][:120]}")
     else:
@@ -246,6 +253,7 @@ def _status_badge(status: str, hold: str | None = None) -> str:
 
 # --- cancel ---
 
+
 def cmd_cancel(args):
     db = get_db()
     task = db.get_task(int(args.task_id))
@@ -288,10 +296,21 @@ def cmd_cancel(args):
         repo = db.get_repo_by_name(task["repo_name"])
         if repo:
             from .github import repo_full_name_from_url
+
             repo_full = repo_full_name_from_url(repo["github_url"])
             subprocess.run(
-                ["gh", "issue", "edit", "--repo", repo_full, str(issue_num),
-                 "--add-label", "backporcher", "--remove-label", "backporcher-in-progress"],
+                [
+                    "gh",
+                    "issue",
+                    "edit",
+                    "--repo",
+                    repo_full,
+                    str(issue_num),
+                    "--add-label",
+                    "backporcher",
+                    "--remove-label",
+                    "backporcher-in-progress",
+                ],
                 capture_output=True,
             )
             print(f"  Restored 'backporcher' label on issue #{issue_num}")
@@ -300,6 +319,7 @@ def cmd_cancel(args):
 
 
 # --- cleanup ---
+
 
 def _cleanup_single_task(task: dict, db: SyncDatabase):
     """Clean up worktree and remote branch for a single task. Returns (worktree_removed, branch_deleted)."""
@@ -316,13 +336,15 @@ def _cleanup_single_task(task: dict, db: SyncDatabase):
     if wt and Path(wt).exists():
         rc = subprocess.run(
             ["git", "worktree", "remove", "--force", wt],
-            cwd=repo_path, capture_output=True,
+            cwd=repo_path,
+            capture_output=True,
         )
         if rc.returncode == 0:
             wt_removed = True
         else:
             # Force-remove directory if git command failed
             import shutil
+
             shutil.rmtree(wt, ignore_errors=True)
             wt_removed = Path(wt).exists() is False
 
@@ -330,7 +352,8 @@ def _cleanup_single_task(task: dict, db: SyncDatabase):
     if wt_removed:
         subprocess.run(
             ["git", "worktree", "prune"],
-            cwd=repo_path, capture_output=True,
+            cwd=repo_path,
+            capture_output=True,
         )
 
     # Delete remote branch
@@ -338,7 +361,9 @@ def _cleanup_single_task(task: dict, db: SyncDatabase):
     if branch:
         rc = subprocess.run(
             ["git", "push", "origin", "--delete", branch],
-            cwd=repo_path, capture_output=True, timeout=30,
+            cwd=repo_path,
+            capture_output=True,
+            timeout=30,
         )
         if rc.returncode == 0:
             br_deleted = True
@@ -355,7 +380,7 @@ def _cleanup_single_task(task: dict, db: SyncDatabase):
 
 
 def cmd_cleanup(args):
-    config = load_config()
+    load_config()
     db = get_db()
 
     if args.task_id:
@@ -394,6 +419,7 @@ def cmd_cleanup(args):
 
 
 # --- approve / hold / release / pause / resume ---
+
 
 def cmd_approve(args):
     db = get_db()
@@ -473,6 +499,7 @@ def cmd_resume(args):
 
 # --- stats ---
 
+
 def cmd_stats(args):
     """Print pipeline performance stats."""
     db = get_db()
@@ -497,7 +524,9 @@ def cmd_stats(args):
         if not s:
             return None
         try:
-            from datetime import datetime as _dt, timezone as _tz
+            from datetime import datetime as _dt
+            from datetime import timezone as _tz
+
             dt = _dt.fromisoformat(s.replace("Z", "+00:00"))
             if dt.tzinfo is None:
                 dt = dt.replace(tzinfo=_tz.utc)
@@ -615,12 +644,15 @@ def cmd_stats(args):
 
 # --- worker ---
 
+
 def cmd_worker(args):
     from .worker import run_worker
+
     run_worker()
 
 
 # --- main ---
+
 
 def main():
     parser = argparse.ArgumentParser(

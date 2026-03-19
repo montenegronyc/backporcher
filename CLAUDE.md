@@ -281,6 +281,7 @@ pip install -e . && sudo systemctl restart backporcher
 
 ## Known Gotchas
 
+- **no_checks blocks merge:** If a repo has no GitHub Actions workflows, the CI monitor blocks the PR from advancing (stays in `reviewed`). A one-time warning is logged. Add a `.github/workflows/ci.yml` to the repo to unblock.
 - **CLAUDECODE env var:** Must be unset in agent subprocesses to avoid Claude Code nested-session detection. The dispatcher strips it from the environment.
 - **Per-repo git locks:** Git operations (fetch, worktree create) are serialized per-repo via `asyncio.Lock` to prevent concurrent fetch/checkout conflicts.
 - **SQLite write lock:** All DB writes go through a single `asyncio.Lock` because SQLite doesn't handle concurrent writers well even in WAL mode.

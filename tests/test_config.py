@@ -1,10 +1,9 @@
 """Tests for config.py — env var loading, defaults."""
 
 import os
-import pytest
 from unittest.mock import patch
 
-from src.config import Config, load_config
+from src.config import load_config
 
 
 class TestConfigDefaults:

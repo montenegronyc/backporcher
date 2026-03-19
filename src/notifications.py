@@ -35,10 +35,12 @@ async def send_webhook(event: str, payload: dict):
         text = payload.get("text", "")
 
         # Send both text (Slack) and content (Discord) fields
-        body = json.dumps({
-            "text": text,
-            "content": text,
-        }).encode("utf-8")
+        body = json.dumps(
+            {
+                "text": text,
+                "content": text,
+            }
+        ).encode("utf-8")
 
         # Run in executor to avoid blocking the event loop
         loop = asyncio.get_running_loop()

@@ -2,9 +2,10 @@
 
 import asyncio
 import sqlite3
-import aiosqlite
-from pathlib import Path
 from datetime import datetime, timezone
+from pathlib import Path
+
+import aiosqlite
 
 SCHEMA_VERSION = 7
 
@@ -51,8 +52,16 @@ CREATE INDEX IF NOT EXISTS idx_task_logs_task_id ON task_logs(task_id);
 """
 
 VALID_STATUSES = (
-    'queued', 'working', 'pr_created', 'reviewing', 'reviewed',
-    'ci_passed', 'retrying', 'completed', 'failed', 'cancelled',
+    "queued",
+    "working",
+    "pr_created",
+    "reviewing",
+    "reviewed",
+    "ci_passed",
+    "retrying",
+    "completed",
+    "failed",
+    "cancelled",
 )
 
 SCHEMA_V3_TASKS = """
@@ -115,9 +124,7 @@ def _get_schema_version(conn) -> int:
         return row[0] if row else 1
     except Exception:
         # No schema_version table — check if tasks table exists (v1)
-        cur = conn.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name='tasks'"
-        )
+        cur = conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='tasks'")
         return 1 if cur.fetchone() else 0
 
 
@@ -388,28 +395,26 @@ class Database:
             return [dict(r) for r in await cur.fetchall()]
 
     async def get_repo(self, repo_id: int) -> dict | None:
-        async with self.db.execute(
-            "SELECT * FROM repos WHERE id = ?", (repo_id,)
-        ) as cur:
+        async with self.db.execute("SELECT * FROM repos WHERE id = ?", (repo_id,)) as cur:
             row = await cur.fetchone()
             return dict(row) if row else None
 
     async def get_repo_by_name(self, name: str) -> dict | None:
         """Lookup by name (case-insensitive)."""
-        async with self.db.execute(
-            "SELECT * FROM repos WHERE LOWER(name) = LOWER(?)", (name,)
-        ) as cur:
+        async with self.db.execute("SELECT * FROM repos WHERE LOWER(name) = LOWER(?)", (name,)) as cur:
             row = await cur.fetchone()
             return dict(row) if row else None
 
     async def add_repo(
-        self, name: str, github_url: str, local_path: str,
+        self,
+        name: str,
+        github_url: str,
+        local_path: str,
         default_branch: str = "main",
     ) -> int:
         async with self._write_lock:
             async with self.db.execute(
-                "INSERT INTO repos (name, github_url, local_path, default_branch) "
-                "VALUES (?, ?, ?, ?)",
+                "INSERT INTO repos (name, github_url, local_path, default_branch) VALUES (?, ?, ?, ?)",
                 (name, github_url, local_path, default_branch),
             ) as cur:
                 await self.db.commit()
@@ -429,7 +434,9 @@ class Database:
     # --- Tasks ---
 
     async def list_tasks(
-        self, status: str | None = None, limit: int = 50,
+        self,
+        status: str | None = None,
+        limit: int = 50,
     ) -> list[dict]:
         if status:
             query = (
@@ -450,15 +457,17 @@ class Database:
 
     async def get_task(self, task_id: int) -> dict | None:
         async with self.db.execute(
-            "SELECT t.*, r.name as repo_name FROM tasks t "
-            "JOIN repos r ON t.repo_id = r.id WHERE t.id = ?",
+            "SELECT t.*, r.name as repo_name FROM tasks t JOIN repos r ON t.repo_id = r.id WHERE t.id = ?",
             (task_id,),
         ) as cur:
             row = await cur.fetchone()
             return dict(row) if row else None
 
     async def create_task(
-        self, repo_id: int, prompt: str, model: str = "sonnet",
+        self,
+        repo_id: int,
+        prompt: str,
+        model: str = "sonnet",
     ) -> int:
         async with self._write_lock:
             async with self.db.execute(
@@ -469,9 +478,14 @@ class Database:
                 return cur.lastrowid
 
     async def create_task_from_issue(
-        self, repo_id: int, prompt: str, model: str,
-        issue_number: int, issue_url: str,
-        priority: int = 100, depends_on_task_id: int | None = None,
+        self,
+        repo_id: int,
+        prompt: str,
+        model: str,
+        issue_number: int,
+        issue_url: str,
+        priority: int = 100,
+        depends_on_task_id: int | None = None,
     ) -> int:
         """Create a task linked to a GitHub issue."""
         async with self._write_lock:
@@ -576,8 +590,11 @@ class Database:
             return [dict(r) for r in await cur.fetchall()]
 
     async def record_metric(
-        self, event: str, task_id: int | None = None,
-        repo: str | None = None, model: str | None = None,
+        self,
+        event: str,
+        task_id: int | None = None,
+        repo: str | None = None,
+        model: str | None = None,
         value: float | None = None,
     ):
         """Append a metric event. Never raises — logs and continues on failure."""
@@ -585,28 +602,48 @@ class Database:
             now = datetime.now(timezone.utc).isoformat()
             async with self._write_lock:
                 await self.db.execute(
-                    "INSERT INTO metrics (event, task_id, repo, model, value, created_at) "
-                    "VALUES (?, ?, ?, ?, ?, ?)",
+                    "INSERT INTO metrics (event, task_id, repo, model, value, created_at) VALUES (?, ?, ?, ?, ?, ?)",
                     (event, task_id, repo, model, value, now),
                 )
                 await self.db.commit()
         except Exception:
             import logging
+
             logging.getLogger("backporcher.db").warning(
-                "Failed to record metric %s for task %s", event, task_id, exc_info=True,
+                "Failed to record metric %s for task %s",
+                event,
+                task_id,
+                exc_info=True,
             )
 
     async def update_task(self, task_id: int, **fields):
         if not fields:
             return
         allowed = {
-            "status", "branch_name", "worktree_path", "pr_url",
-            "agent_pid", "exit_code", "error_message", "output_summary",
-            "review_summary", "prompt", "model",
-            "started_at", "completed_at",
-            "pr_number", "github_issue_number", "github_issue_url", "retry_count",
-            "priority", "depends_on_task_id", "hold",
-            "agent_started_at", "agent_finished_at", "model_used", "initial_model",
+            "status",
+            "branch_name",
+            "worktree_path",
+            "pr_url",
+            "agent_pid",
+            "exit_code",
+            "error_message",
+            "output_summary",
+            "review_summary",
+            "prompt",
+            "model",
+            "started_at",
+            "completed_at",
+            "pr_number",
+            "github_issue_number",
+            "github_issue_url",
+            "retry_count",
+            "priority",
+            "depends_on_task_id",
+            "hold",
+            "agent_started_at",
+            "agent_finished_at",
+            "model_used",
+            "initial_model",
         }
         fields = {k: v for k, v in fields.items() if k in allowed}
         if not fields:
@@ -672,9 +709,7 @@ class Database:
 
     async def is_queue_paused(self) -> bool:
         """Check if the global queue is paused."""
-        async with self.db.execute(
-            "SELECT value FROM system_state WHERE key = 'queue_paused'"
-        ) as cur:
+        async with self.db.execute("SELECT value FROM system_state WHERE key = 'queue_paused'") as cur:
             row = await cur.fetchone()
             return row is not None and row[0] == "true"
 
@@ -701,16 +736,12 @@ class Database:
             return [dict(r) for r in await cur.fetchall()]
 
     async def count_active(self) -> int:
-        async with self.db.execute(
-            "SELECT COUNT(*) FROM tasks WHERE status = 'working'"
-        ) as cur:
+        async with self.db.execute("SELECT COUNT(*) FROM tasks WHERE status = 'working'") as cur:
             row = await cur.fetchone()
             return row[0]
 
     async def count_queued(self) -> int:
-        async with self.db.execute(
-            "SELECT COUNT(*) FROM tasks WHERE status = 'queued'"
-        ) as cur:
+        async with self.db.execute("SELECT COUNT(*) FROM tasks WHERE status = 'queued'") as cur:
             row = await cur.fetchone()
             return row[0]
 
@@ -725,11 +756,13 @@ class Database:
             await self.db.commit()
 
     async def get_logs(
-        self, task_id: int, limit: int = 20, offset: int = 0,
+        self,
+        task_id: int,
+        limit: int = 20,
+        offset: int = 0,
     ) -> list[dict]:
         async with self.db.execute(
-            "SELECT * FROM task_logs WHERE task_id = ? "
-            "ORDER BY created_at DESC LIMIT ? OFFSET ?",
+            "SELECT * FROM task_logs WHERE task_id = ? ORDER BY created_at DESC LIMIT ? OFFSET ?",
             (task_id, limit, offset),
         ) as cur:
             rows = [dict(r) for r in await cur.fetchall()]
@@ -793,19 +826,19 @@ CREATE INDEX IF NOT EXISTS idx_task_logs_task_id ON task_logs(task_id);
         return [dict(r) for r in cur.fetchall()]
 
     def get_repo_by_name(self, name: str) -> dict | None:
-        cur = self.db.execute(
-            "SELECT * FROM repos WHERE LOWER(name) = LOWER(?)", (name,)
-        )
+        cur = self.db.execute("SELECT * FROM repos WHERE LOWER(name) = LOWER(?)", (name,))
         row = cur.fetchone()
         return dict(row) if row else None
 
     def add_repo(
-        self, name: str, github_url: str, local_path: str,
+        self,
+        name: str,
+        github_url: str,
+        local_path: str,
         default_branch: str = "main",
     ) -> int:
         cur = self.db.execute(
-            "INSERT INTO repos (name, github_url, local_path, default_branch) "
-            "VALUES (?, ?, ?, ?)",
+            "INSERT INTO repos (name, github_url, local_path, default_branch) VALUES (?, ?, ?, ?)",
             (name, github_url, local_path, default_branch),
         )
         self.db.commit()
@@ -838,8 +871,7 @@ CREATE INDEX IF NOT EXISTS idx_task_logs_task_id ON task_logs(task_id);
 
     def get_task(self, task_id: int) -> dict | None:
         cur = self.db.execute(
-            "SELECT t.*, r.name as repo_name FROM tasks t "
-            "JOIN repos r ON t.repo_id = r.id WHERE t.id = ?",
+            "SELECT t.*, r.name as repo_name FROM tasks t JOIN repos r ON t.repo_id = r.id WHERE t.id = ?",
             (task_id,),
         )
         row = cur.fetchone()
@@ -864,8 +896,7 @@ CREATE INDEX IF NOT EXISTS idx_task_logs_task_id ON task_logs(task_id);
 
     def get_logs(self, task_id: int, limit: int = 20) -> list[dict]:
         cur = self.db.execute(
-            "SELECT * FROM task_logs WHERE task_id = ? "
-            "ORDER BY created_at DESC LIMIT ?",
+            "SELECT * FROM task_logs WHERE task_id = ? ORDER BY created_at DESC LIMIT ?",
             (task_id, limit),
         )
         rows = [dict(r) for r in cur.fetchall()]
@@ -873,36 +904,59 @@ CREATE INDEX IF NOT EXISTS idx_task_logs_task_id ON task_logs(task_id);
         return rows
 
     def record_metric(
-        self, event: str, task_id: int | None = None,
-        repo: str | None = None, model: str | None = None,
+        self,
+        event: str,
+        task_id: int | None = None,
+        repo: str | None = None,
+        model: str | None = None,
         value: float | None = None,
     ):
         """Append a metric event. Never raises — logs and continues on failure."""
         try:
             now = datetime.now(timezone.utc).isoformat()
             self.db.execute(
-                "INSERT INTO metrics (event, task_id, repo, model, value, created_at) "
-                "VALUES (?, ?, ?, ?, ?, ?)",
+                "INSERT INTO metrics (event, task_id, repo, model, value, created_at) VALUES (?, ?, ?, ?, ?, ?)",
                 (event, task_id, repo, model, value, now),
             )
             self.db.commit()
         except Exception:
             import logging
+
             logging.getLogger("backporcher.db").warning(
-                "Failed to record metric %s for task %s", event, task_id, exc_info=True,
+                "Failed to record metric %s for task %s",
+                event,
+                task_id,
+                exc_info=True,
             )
 
     def update_task(self, task_id: int, **fields):
         if not fields:
             return
         allowed = {
-            "status", "branch_name", "worktree_path", "pr_url",
-            "agent_pid", "exit_code", "error_message", "output_summary",
-            "review_summary", "prompt", "model",
-            "started_at", "completed_at",
-            "pr_number", "github_issue_number", "github_issue_url", "retry_count",
-            "priority", "depends_on_task_id", "hold",
-            "agent_started_at", "agent_finished_at", "model_used", "initial_model",
+            "status",
+            "branch_name",
+            "worktree_path",
+            "pr_url",
+            "agent_pid",
+            "exit_code",
+            "error_message",
+            "output_summary",
+            "review_summary",
+            "prompt",
+            "model",
+            "started_at",
+            "completed_at",
+            "pr_number",
+            "github_issue_number",
+            "github_issue_url",
+            "retry_count",
+            "priority",
+            "depends_on_task_id",
+            "hold",
+            "agent_started_at",
+            "agent_finished_at",
+            "model_used",
+            "initial_model",
         }
         fields = {k: v for k, v in fields.items() if k in allowed}
         if not fields:
@@ -967,13 +1021,9 @@ CREATE INDEX IF NOT EXISTS idx_task_logs_task_id ON task_logs(task_id);
         self.db.commit()
 
     def count_active(self) -> int:
-        cur = self.db.execute(
-            "SELECT COUNT(*) FROM tasks WHERE status = 'working'"
-        )
+        cur = self.db.execute("SELECT COUNT(*) FROM tasks WHERE status = 'working'")
         return cur.fetchone()[0]
 
     def count_queued(self) -> int:
-        cur = self.db.execute(
-            "SELECT COUNT(*) FROM tasks WHERE status = 'queued'"
-        )
+        cur = self.db.execute("SELECT COUNT(*) FROM tasks WHERE status = 'queued'")
         return cur.fetchone()[0]

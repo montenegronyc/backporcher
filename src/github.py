@@ -28,17 +28,20 @@ class CIStatus:
 
 
 async def _run_gh(
-    *args: str, timeout: int = 30,
+    *args: str,
+    timeout: int = 30,
 ) -> tuple[int, str, str]:
     """Run a gh CLI command. Returns (returncode, stdout, stderr)."""
     proc = await asyncio.create_subprocess_exec(
-        "gh", *args,
+        "gh",
+        *args,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
     )
     try:
         stdout, stderr = await asyncio.wait_for(
-            proc.communicate(), timeout=timeout,
+            proc.communicate(),
+            timeout=timeout,
         )
     except asyncio.TimeoutError:
         proc.kill()
@@ -83,10 +86,14 @@ async def ensure_labels(repo_full_name: str) -> None:
         return
 
     rc, out, _ = await _run_gh(
-        "label", "list",
-        "--repo", repo_full_name,
-        "--json", "name",
-        "--limit", "100",
+        "label",
+        "list",
+        "--repo",
+        repo_full_name,
+        "--json",
+        "name",
+        "--limit",
+        "100",
     )
     if rc != 0:
         log.warning("Failed to list labels for %s, skipping ensure", repo_full_name)
@@ -100,10 +107,15 @@ async def ensure_labels(repo_full_name: str) -> None:
     for label, (color, desc) in REQUIRED_LABELS.items():
         if label not in existing:
             rc, _, err = await _run_gh(
-                "label", "create", label,
-                "--repo", repo_full_name,
-                "--color", color,
-                "--description", desc,
+                "label",
+                "create",
+                label,
+                "--repo",
+                repo_full_name,
+                "--color",
+                color,
+                "--description",
+                desc,
             )
             if rc == 0:
                 log.info("Created label '%s' on %s", label, repo_full_name)
@@ -114,16 +126,23 @@ async def ensure_labels(repo_full_name: str) -> None:
 
 
 async def find_new_issues(
-    repo_full_name: str, allowed_users: set[str],
+    repo_full_name: str,
+    allowed_users: set[str],
 ) -> list[GitHubIssue]:
     """Find open issues labeled 'backporcher' that aren't claimed yet."""
     rc, out, err = await _run_gh(
-        "issue", "list",
-        "--repo", repo_full_name,
-        "--label", "backporcher",
-        "--state", "open",
-        "--json", "number,title,body,url,labels,author",
-        "--limit", "20",
+        "issue",
+        "list",
+        "--repo",
+        repo_full_name,
+        "--label",
+        "backporcher",
+        "--state",
+        "open",
+        "--json",
+        "number,title,body,url,labels,author",
+        "--limit",
+        "20",
     )
     if rc != 0:
         log.error("Failed to list issues for %s: %s", repo_full_name, err.strip())
@@ -149,14 +168,16 @@ async def find_new_issues(
             log.debug("Skipping issue #%d by %s (not in allowlist)", item["number"], author)
             continue
 
-        results.append(GitHubIssue(
-            number=item["number"],
-            title=item.get("title", ""),
-            body=item.get("body", ""),
-            url=item.get("url", ""),
-            author=author,
-            labels=label_names,
-        ))
+        results.append(
+            GitHubIssue(
+                number=item["number"],
+                title=item.get("title", ""),
+                body=item.get("body", ""),
+                url=item.get("url", ""),
+                author=author,
+                labels=label_names,
+            )
+        )
 
     return results
 
@@ -164,7 +185,8 @@ async def find_new_issues(
 async def claim_issue(repo_full_name: str, number: int) -> bool:
     """Add 'backporcher-in-progress' label, remove 'backporcher' label, assign self."""
     ok = await update_issue_labels(
-        repo_full_name, number,
+        repo_full_name,
+        number,
         add=["backporcher-in-progress"],
         remove=["backporcher"],
     )
@@ -173,10 +195,13 @@ async def claim_issue(repo_full_name: str, number: int) -> bool:
 
     # Assign to self (the gh-authenticated user)
     rc, _, err = await _run_gh(
-        "issue", "edit",
-        "--repo", repo_full_name,
+        "issue",
+        "edit",
+        "--repo",
+        repo_full_name,
         str(number),
-        "--add-assignee", "@me",
+        "--add-assignee",
+        "@me",
     )
     if rc != 0:
         log.warning("Failed to assign issue #%d: %s", number, err.strip())
@@ -186,14 +211,19 @@ async def claim_issue(repo_full_name: str, number: int) -> bool:
 
 
 async def comment_on_issue(
-    repo_full_name: str, number: int, body: str,
+    repo_full_name: str,
+    number: int,
+    body: str,
 ) -> bool:
     """Post a comment on an issue."""
     rc, _, err = await _run_gh(
-        "issue", "comment",
-        "--repo", repo_full_name,
+        "issue",
+        "comment",
+        "--repo",
+        repo_full_name,
         str(number),
-        "--body", body,
+        "--body",
+        body,
     )
     if rc != 0:
         log.error("Failed to comment on issue #%d: %s", number, err.strip())
@@ -202,14 +232,19 @@ async def comment_on_issue(
 
 
 async def close_issue(
-    repo_full_name: str, number: int, reason: str = "completed",
+    repo_full_name: str,
+    number: int,
+    reason: str = "completed",
 ) -> bool:
     """Close an issue."""
     rc, _, err = await _run_gh(
-        "issue", "close",
-        "--repo", repo_full_name,
+        "issue",
+        "close",
+        "--repo",
+        repo_full_name,
         str(number),
-        "--reason", reason,
+        "--reason",
+        reason,
     )
     if rc != 0:
         log.error("Failed to close issue #%d: %s", number, err.strip())
@@ -218,15 +253,16 @@ async def close_issue(
 
 
 async def update_issue_labels(
-    repo_full_name: str, number: int,
+    repo_full_name: str,
+    number: int,
     add: list[str] | None = None,
     remove: list[str] | None = None,
 ) -> bool:
     """Add/remove labels on an issue."""
     args = ["issue", "edit", "--repo", repo_full_name, str(number)]
-    for label in (add or []):
+    for label in add or []:
         args.extend(["--add-label", label])
-    for label in (remove or []):
+    for label in remove or []:
         args.extend(["--remove-label", label])
 
     rc, _, err = await _run_gh(*args)
@@ -237,14 +273,18 @@ async def update_issue_labels(
 
 
 async def get_pr_ci_status(
-    repo_full_name: str, pr_number: int,
+    repo_full_name: str,
+    pr_number: int,
 ) -> CIStatus:
     """Check CI status of a PR using statusCheckRollup."""
     rc, out, err = await _run_gh(
-        "pr", "view",
-        "--repo", repo_full_name,
+        "pr",
+        "view",
+        "--repo",
+        repo_full_name,
         str(pr_number),
-        "--json", "statusCheckRollup",
+        "--json",
+        "statusCheckRollup",
     )
     if rc != 0:
         log.error("Failed to get PR #%d status: %s", pr_number, err.strip())
@@ -290,17 +330,24 @@ async def get_pr_ci_status(
 
 
 async def get_ci_failure_logs(
-    repo_full_name: str, branch: str,
+    repo_full_name: str,
+    branch: str,
 ) -> str:
     """Get logs from the most recent failed CI run on a branch."""
     # Step 1: find the failed run
     rc, out, err = await _run_gh(
-        "run", "list",
-        "--repo", repo_full_name,
-        "--branch", branch,
-        "--status", "failure",
-        "--json", "databaseId",
-        "--limit", "1",
+        "run",
+        "list",
+        "--repo",
+        repo_full_name,
+        "--branch",
+        branch,
+        "--status",
+        "failure",
+        "--json",
+        "databaseId",
+        "--limit",
+        "1",
     )
     if rc != 0 or not out.strip():
         return "No failed CI runs found."
@@ -317,8 +364,10 @@ async def get_ci_failure_logs(
 
     # Step 2: get the failed logs
     rc, out, err = await _run_gh(
-        "run", "view",
-        "--repo", repo_full_name,
+        "run",
+        "view",
+        "--repo",
+        repo_full_name,
         str(run_id),
         "--log-failed",
         timeout=60,
@@ -337,8 +386,10 @@ async def get_ci_failure_logs(
 async def get_pr_diff(repo_full_name: str, pr_number: int) -> str:
     """Get unified diff for a PR. Truncate to 15000 chars."""
     rc, out, err = await _run_gh(
-        "pr", "diff",
-        "--repo", repo_full_name,
+        "pr",
+        "diff",
+        "--repo",
+        repo_full_name,
         str(pr_number),
         timeout=60,
     )
@@ -352,14 +403,19 @@ async def get_pr_diff(repo_full_name: str, pr_number: int) -> str:
 
 
 async def comment_on_pr(
-    repo_full_name: str, pr_number: int, body: str,
+    repo_full_name: str,
+    pr_number: int,
+    body: str,
 ) -> bool:
     """Post a comment on a PR."""
     rc, _, err = await _run_gh(
-        "pr", "comment",
-        "--repo", repo_full_name,
+        "pr",
+        "comment",
+        "--repo",
+        repo_full_name,
         str(pr_number),
-        "--body", body,
+        "--body",
+        body,
     )
     if rc != 0:
         log.error("Failed to comment on PR #%d: %s", pr_number, err.strip())
@@ -368,20 +424,27 @@ async def comment_on_pr(
 
 
 async def close_pr(
-    repo_full_name: str, pr_number: int, comment: str | None = None,
+    repo_full_name: str,
+    pr_number: int,
+    comment: str | None = None,
 ) -> bool:
     """Close a PR with optional comment."""
     if comment:
         await _run_gh(
-            "pr", "comment",
-            "--repo", repo_full_name,
+            "pr",
+            "comment",
+            "--repo",
+            repo_full_name,
             str(pr_number),
-            "--body", comment,
+            "--body",
+            comment,
         )
 
     rc, _, err = await _run_gh(
-        "pr", "close",
-        "--repo", repo_full_name,
+        "pr",
+        "close",
+        "--repo",
+        repo_full_name,
         str(pr_number),
     )
     if rc != 0:
@@ -393,10 +456,13 @@ async def close_pr(
 async def is_pr_conflicting(repo_full_name: str, pr_number: int) -> bool:
     """Check if a PR has merge conflicts."""
     rc, out, _ = await _run_gh(
-        "pr", "view",
-        "--repo", repo_full_name,
+        "pr",
+        "view",
+        "--repo",
+        repo_full_name,
         str(pr_number),
-        "--json", "mergeable",
+        "--json",
+        "mergeable",
     )
     if rc != 0:
         return False
@@ -408,12 +474,16 @@ async def is_pr_conflicting(repo_full_name: str, pr_number: int) -> bool:
 
 
 async def merge_pr(
-    repo_full_name: str, pr_number: int, method: str = "squash",
+    repo_full_name: str,
+    pr_number: int,
+    method: str = "squash",
 ) -> bool:
     """Merge a PR directly (coordinator auto-merge)."""
     rc, _, err = await _run_gh(
-        "pr", "merge",
-        "--repo", repo_full_name,
+        "pr",
+        "merge",
+        "--repo",
+        repo_full_name,
         str(pr_number),
         f"--{method}",
     )
@@ -426,16 +496,23 @@ async def merge_pr(
 
 
 async def list_open_prs(
-    repo_full_name: str, label: str = "backporcher-in-progress",
+    repo_full_name: str,
+    label: str = "backporcher-in-progress",
 ) -> list[dict]:
     """List open backporcher PRs for conflict awareness."""
     rc, out, err = await _run_gh(
-        "pr", "list",
-        "--repo", repo_full_name,
-        "--label", label,
-        "--state", "open",
-        "--json", "number,title,headRefName,files",
-        "--limit", "50",
+        "pr",
+        "list",
+        "--repo",
+        repo_full_name,
+        "--label",
+        label,
+        "--state",
+        "open",
+        "--json",
+        "number,title,headRefName,files",
+        "--limit",
+        "50",
     )
     if rc != 0:
         log.error("Failed to list open PRs for %s: %s", repo_full_name, err.strip())
@@ -450,10 +527,12 @@ async def list_open_prs(
     results = []
     for pr in prs:
         changed_files = [f.get("path", "") for f in (pr.get("files") or [])]
-        results.append({
-            "number": pr["number"],
-            "title": pr.get("title", ""),
-            "branch": pr.get("headRefName", ""),
-            "changed_files": changed_files,
-        })
+        results.append(
+            {
+                "number": pr["number"],
+                "title": pr.get("title", ""),
+                "branch": pr.get("headRefName", ""),
+                "changed_files": changed_files,
+            }
+        )
     return results

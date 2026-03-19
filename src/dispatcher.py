@@ -14,9 +14,12 @@ from urllib.parse import urlparse
 from .config import Config
 from .db import Database
 from .github import (
-    close_pr, comment_on_issue, extract_pr_number_from_url,
-    get_ci_failure_logs, get_pr_diff, list_open_prs,
-    repo_full_name_from_url, update_issue_labels,
+    comment_on_issue,
+    extract_pr_number_from_url,
+    get_pr_diff,
+    list_open_prs,
+    repo_full_name_from_url,
+    update_issue_labels,
 )
 
 log = logging.getLogger("backporcher.dispatcher")
@@ -36,12 +39,14 @@ async def _mark_issue_failed(task: dict, db: Database, reason: str):
         return
     repo_full = repo_full_name_from_url(repo["github_url"])
     await update_issue_labels(
-        repo_full, issue_num,
+        repo_full,
+        issue_num,
         add=["backporcher-failed"],
         remove=["backporcher-in-progress"],
     )
     await comment_on_issue(
-        repo_full, issue_num,
+        repo_full,
+        issue_num,
         f"{reason}\n\nRe-add the `backporcher` label to retry.",
     )
 
@@ -55,10 +60,9 @@ def _get_repo_lock(repo_id: int) -> asyncio.Lock:
         _repo_locks[repo_id] = asyncio.Lock()
     return _repo_locks[repo_id]
 
+
 BRANCH_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9/_-]{0,100}$")
-GITHUB_URL_RE = re.compile(
-    r"^https://github\.com/[a-zA-Z0-9._-]+/[a-zA-Z0-9._-]+(\.git)?$"
-)
+GITHUB_URL_RE = re.compile(r"^https://github\.com/[a-zA-Z0-9._-]+/[a-zA-Z0-9._-]+(\.git)?$")
 
 
 def validate_github_url(url: str, config: Config) -> str:
@@ -109,9 +113,7 @@ async def run_cmd(
         stderr=asyncio.subprocess.PIPE,
     )
     try:
-        stdout, stderr = await asyncio.wait_for(
-            proc.communicate(), timeout=timeout
-        )
+        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
     except asyncio.TimeoutError:
         proc.kill()
         await proc.wait()
@@ -130,17 +132,13 @@ async def clone_or_fetch(repo: dict, config: Config) -> Path:
 
     if local_path.exists() and (local_path / ".git").exists():
         log.info("Fetching %s", repo["name"])
-        rc, _, err = await run_cmd(
-            "git", "fetch", "--all", "--prune", "--force", cwd=local_path
-        )
+        rc, _, err = await run_cmd("git", "fetch", "--all", "--prune", "--force", cwd=local_path)
         if rc != 0:
             raise RuntimeError(f"git fetch failed: {err}")
     else:
         log.info("Cloning %s -> %s", repo["github_url"], local_path)
         local_path.mkdir(parents=True, exist_ok=True)
-        rc, _, err = await run_cmd(
-            "git", "clone", repo["github_url"], str(local_path), timeout=300
-        )
+        rc, _, err = await run_cmd("git", "clone", repo["github_url"], str(local_path), timeout=300)
         if rc != 0:
             raise RuntimeError(f"git clone failed: {err}")
 
@@ -148,7 +146,10 @@ async def clone_or_fetch(repo: dict, config: Config) -> Path:
 
 
 async def setup_worktree(
-    repo_path: Path, task_id: int, branch_name: str, default_branch: str,
+    repo_path: Path,
+    task_id: int,
+    branch_name: str,
+    default_branch: str,
 ) -> Path:
     """Create a git worktree for the task."""
     worktree_path = repo_path / ".worktrees" / str(task_id)
@@ -156,12 +157,17 @@ async def setup_worktree(
     # Clean up stale worktree if exists
     if worktree_path.exists():
         await run_cmd(
-            "git", "worktree", "remove", "--force",
-            str(worktree_path), cwd=repo_path,
+            "git",
+            "worktree",
+            "remove",
+            "--force",
+            str(worktree_path),
+            cwd=repo_path,
         )
         # Force-remove directory if git worktree remove didn't clean it
         if worktree_path.exists():
             import shutil
+
             shutil.rmtree(str(worktree_path), ignore_errors=True)
 
     # Prune stale worktree refs so branch -D can succeed
@@ -176,8 +182,13 @@ async def setup_worktree(
 
     # Delete stale remote branch too (prevents push rejection on re-queue)
     rc, _, _ = await run_cmd(
-        "git", "push", "origin", "--delete", branch_name,
-        cwd=repo_path, timeout=30,
+        "git",
+        "push",
+        "origin",
+        "--delete",
+        branch_name,
+        cwd=repo_path,
+        timeout=30,
     )
     if rc == 0:
         log.info("Deleted stale remote branch %s", branch_name)
@@ -185,8 +196,13 @@ async def setup_worktree(
     worktree_path.parent.mkdir(parents=True, exist_ok=True)
 
     rc, _, err = await run_cmd(
-        "git", "worktree", "add", "-b", branch_name,
-        str(worktree_path), f"origin/{default_branch}",
+        "git",
+        "worktree",
+        "add",
+        "-b",
+        branch_name,
+        str(worktree_path),
+        f"origin/{default_branch}",
         cwd=repo_path,
     )
     if rc != 0:
@@ -219,27 +235,32 @@ async def run_agent(
     prompt = (
         "IMPORTANT: You are running non-interactively via an automated dispatcher. "
         "Implement directly — do NOT give an approach summary or wait for approval. "
-        "Start coding immediately.\n\n"
-        + task["prompt"]
+        "Start coding immediately.\n\n" + task["prompt"]
     )
     model = task["model"]
     log_file = config.logs_dir / f"{task['id']}.jsonl"
 
     cmd = [
-        "claude", "-p",
-        "--output-format", "stream-json",
+        "claude",
+        "-p",
+        "--output-format",
+        "stream-json",
         "--verbose",
         "--dangerously-skip-permissions",
-        "--model", model,
+        "--model",
+        model,
         prompt,
     ]
 
     # Sandbox: wrap with sudo -u + prlimit when agent_user is configured
     if config.agent_user:
         cmd = [
-            "sudo", "-u", config.agent_user, "--",
+            "sudo",
+            "-u",
+            config.agent_user,
+            "--",
             "prlimit",
-            "--nproc=500",        # max 500 processes
+            "--nproc=500",  # max 500 processes
             "--fsize=2147483648",  # 2 GB max file size
             "--",
             *cmd,
@@ -248,15 +269,20 @@ async def run_agent(
     else:
         # Clean env: strip sensitive vars and CLAUDECODE (nested-session detection)
         _sensitive_vars = {
-            "CLAUDECODE", "SSH_AUTH_SOCK", "SSH_AGENT_PID",
-            "GIT_ASKPASS", "GIT_CREDENTIALS", "GITHUB_TOKEN",
-            "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN",
-            "ANTHROPIC_API_KEY", "OPENAI_API_KEY",
+            "CLAUDECODE",
+            "SSH_AUTH_SOCK",
+            "SSH_AGENT_PID",
+            "GIT_ASKPASS",
+            "GIT_CREDENTIALS",
+            "GITHUB_TOKEN",
+            "AWS_SECRET_ACCESS_KEY",
+            "AWS_SESSION_TOKEN",
+            "ANTHROPIC_API_KEY",
+            "OPENAI_API_KEY",
         }
         agent_env = {k: v for k, v in os.environ.items() if k not in _sensitive_vars}
 
-    log.info("Starting agent for task %d (model=%s, user=%s)",
-             task["id"], model, config.agent_user or "self")
+    log.info("Starting agent for task %d (model=%s, user=%s)", task["id"], model, config.agent_user or "self")
     await db.add_log(task["id"], f"Starting agent with model={model}")
 
     proc = await asyncio.create_subprocess_exec(
@@ -298,7 +324,7 @@ async def run_agent(
 
                 if etype == "assistant" and "message" in event:
                     msg = event["message"]
-                    for block in (msg.get("content") or []):
+                    for block in msg.get("content") or []:
                         if block.get("type") == "text":
                             text = block["text"]
                             if content_size < MAX_CONTENT_BYTES:
@@ -365,7 +391,10 @@ async def run_agent(
 
 
 async def run_verify(
-    worktree_path: Path, verify_command: str, task_id: int, db: Database,
+    worktree_path: Path,
+    verify_command: str,
+    task_id: int,
+    db: Database,
     config: Config | None = None,
 ) -> tuple[bool, str]:
     """Run repo's verify command in the worktree. Returns (passed, output)."""
@@ -377,8 +406,14 @@ async def run_verify(
     cmd: list[str] = ["bash", "-c", verify_command]
     if config and config.agent_user:
         cmd = [
-            "sudo", "-u", config.agent_user, "--",
-            "prlimit", "--nproc=500", "--fsize=2147483648", "--",
+            "sudo",
+            "-u",
+            config.agent_user,
+            "--",
+            "prlimit",
+            "--nproc=500",
+            "--fsize=2147483648",
+            "--",
             *cmd,
         ]
 
@@ -408,13 +443,19 @@ async def run_verify(
 
 
 async def create_pr(
-    worktree_path: Path, task: dict, repo: dict, db: Database,
+    worktree_path: Path,
+    task: dict,
+    repo: dict,
+    db: Database,
 ) -> str | None:
     """Check for commits, push, and create a PR. Returns PR URL or None."""
     # Check if agent made any commits beyond the base
     rc, out, _ = await run_cmd(
-        "git", "log", f"origin/{repo['default_branch']}..HEAD",
-        "--oneline", cwd=worktree_path,
+        "git",
+        "log",
+        f"origin/{repo['default_branch']}..HEAD",
+        "--oneline",
+        cwd=worktree_path,
     )
     if rc != 0 or not out.strip():
         # Also check for uncommitted changes
@@ -434,8 +475,13 @@ async def create_pr(
     await db.add_log(task["id"], f"Pushing branch {branch}...")
 
     rc, _, err = await run_cmd(
-        "git", "push", "-u", "origin", branch,
-        cwd=worktree_path, timeout=120,
+        "git",
+        "push",
+        "-u",
+        "origin",
+        branch,
+        cwd=worktree_path,
+        timeout=120,
     )
     if rc != 0:
         await db.add_log(task["id"], f"git push failed: {err}", level="error")
@@ -451,12 +497,19 @@ async def create_pr(
         f"---\n_Created by Backporcher dispatcher_{closes_line}"
     )
     rc, out, err = await run_cmd(
-        "gh", "pr", "create",
-        "--title", pr_title,
-        "--body", pr_body,
-        "--head", branch,
-        "--base", repo["default_branch"],
-        cwd=worktree_path, timeout=60,
+        "gh",
+        "pr",
+        "create",
+        "--title",
+        pr_title,
+        "--body",
+        pr_body,
+        "--head",
+        branch,
+        "--base",
+        repo["default_branch"],
+        cwd=worktree_path,
+        timeout=60,
     )
     if rc != 0:
         await db.add_log(task["id"], f"PR creation failed: {err}", level="error")
@@ -498,7 +551,9 @@ VERDICT: REJECT — {{one-line reason}}
 
 
 async def run_review(
-    task: dict, config: Config, db: Database,
+    task: dict,
+    config: Config,
+    db: Database,
 ) -> tuple[str, str]:
     """Run coordinator review on a PR. Returns (verdict, summary).
 
@@ -544,25 +599,40 @@ async def run_review(
     cwd = worktree_path if worktree_path and Path(worktree_path).exists() else repo["local_path"]
 
     cmd = [
-        "claude", "-p",
-        "--output-format", "text",
-        "--model", config.coordinator_model,
+        "claude",
+        "-p",
+        "--output-format",
+        "text",
+        "--model",
+        config.coordinator_model,
         review_prompt,
     ]
 
     if config.agent_user:
         cmd = [
-            "sudo", "-u", config.agent_user, "--",
-            "prlimit", "--nproc=500", "--fsize=2147483648", "--",
+            "sudo",
+            "-u",
+            config.agent_user,
+            "--",
+            "prlimit",
+            "--nproc=500",
+            "--fsize=2147483648",
+            "--",
             *cmd,
         ]
         agent_env = None
     else:
         _sensitive_vars = {
-            "CLAUDECODE", "SSH_AUTH_SOCK", "SSH_AGENT_PID",
-            "GIT_ASKPASS", "GIT_CREDENTIALS", "GITHUB_TOKEN",
-            "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN",
-            "ANTHROPIC_API_KEY", "OPENAI_API_KEY",
+            "CLAUDECODE",
+            "SSH_AUTH_SOCK",
+            "SSH_AGENT_PID",
+            "GIT_ASKPASS",
+            "GIT_CREDENTIALS",
+            "GITHUB_TOKEN",
+            "AWS_SECRET_ACCESS_KEY",
+            "AWS_SESSION_TOKEN",
+            "ANTHROPIC_API_KEY",
+            "OPENAI_API_KEY",
         }
         agent_env = {k: v for k, v in os.environ.items() if k not in _sensitive_vars}
 
@@ -579,7 +649,8 @@ async def run_review(
 
     try:
         stdout, stderr = await asyncio.wait_for(
-            proc.communicate(), timeout=300,
+            proc.communicate(),
+            timeout=300,
         )
     except asyncio.TimeoutError:
         proc.kill()
@@ -613,8 +684,12 @@ async def cleanup_worktree(repo_path: Path, task_id: int) -> bool:
     if not worktree_path.exists():
         return False
     rc, _, err = await run_cmd(
-        "git", "worktree", "remove", "--force",
-        str(worktree_path), cwd=repo_path,
+        "git",
+        "worktree",
+        "remove",
+        "--force",
+        str(worktree_path),
+        cwd=repo_path,
     )
     return rc == 0
 
@@ -637,8 +712,12 @@ async def cleanup_task_artifacts(task: dict, db: Database):
     worktree = task.get("worktree_path")
     if worktree and Path(worktree).exists():
         rc, _, err = await run_cmd(
-            "git", "worktree", "remove", "--force",
-            worktree, cwd=repo_path,
+            "git",
+            "worktree",
+            "remove",
+            "--force",
+            worktree,
+            cwd=repo_path,
         )
         if rc == 0:
             log.info("Task #%d: removed worktree %s", task_id, worktree)
@@ -658,8 +737,13 @@ async def cleanup_task_artifacts(task: dict, db: Database):
     branch = task.get("branch_name")
     if branch:
         rc, _, _ = await run_cmd(
-            "git", "push", "origin", "--delete", branch,
-            cwd=repo_path, timeout=30,
+            "git",
+            "push",
+            "origin",
+            "--delete",
+            branch,
+            cwd=repo_path,
+            timeout=30,
         )
         if rc == 0:
             log.info("Task #%d: deleted remote branch %s", task_id, branch)
@@ -683,7 +767,10 @@ async def ensure_repo_permissions(repo_path: Path, config: Config):
 
 
 async def retry_with_ci_context(
-    task: dict, ci_logs: str, config: Config, db: Database,
+    task: dict,
+    ci_logs: str,
+    config: Config,
+    db: Database,
 ):
     """Re-run the agent with CI failure context on the existing branch."""
     task_id = task["id"]
@@ -721,12 +808,14 @@ async def retry_with_ci_context(
     if exit_code != 0:
         now = datetime.now(timezone.utc).isoformat()
         await db.update_task(
-            task_id, status="failed",
+            task_id,
+            status="failed",
             error_message=f"Retry agent exited with code {exit_code}",
             completed_at=now,
         )
         await _mark_issue_failed(
-            task, db,
+            task,
+            db,
             f"CI retry agent failed with exit code {exit_code}.",
         )
         await cleanup_task_artifacts(task, db)
@@ -735,8 +824,13 @@ async def retry_with_ci_context(
     # Push fixes (force-with-lease since we're updating the same branch)
     branch = task["branch_name"]
     rc, _, err = await run_cmd(
-        "git", "push", "--force-with-lease", "origin", branch,
-        cwd=worktree_path, timeout=120,
+        "git",
+        "push",
+        "--force-with-lease",
+        "origin",
+        branch,
+        cwd=worktree_path,
+        timeout=120,
     )
     if rc != 0:
         await db.add_log(task_id, f"Force push failed on retry: {err}", level="error")
@@ -784,17 +878,29 @@ async def triage_issue(title: str, body: str, config: Config) -> tuple[str, str]
 
     if config.agent_user:
         cmd = [
-            "sudo", "-u", config.agent_user, "--",
-            "prlimit", "--nproc=500", "--fsize=2147483648", "--",
+            "sudo",
+            "-u",
+            config.agent_user,
+            "--",
+            "prlimit",
+            "--nproc=500",
+            "--fsize=2147483648",
+            "--",
             *cmd,
         ]
         agent_env = None
     else:
         _sensitive_vars = {
-            "CLAUDECODE", "SSH_AUTH_SOCK", "SSH_AGENT_PID",
-            "GIT_ASKPASS", "GIT_CREDENTIALS", "GITHUB_TOKEN",
-            "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN",
-            "ANTHROPIC_API_KEY", "OPENAI_API_KEY",
+            "CLAUDECODE",
+            "SSH_AUTH_SOCK",
+            "SSH_AGENT_PID",
+            "GIT_ASKPASS",
+            "GIT_CREDENTIALS",
+            "GITHUB_TOKEN",
+            "AWS_SECRET_ACCESS_KEY",
+            "AWS_SESSION_TOKEN",
+            "ANTHROPIC_API_KEY",
+            "OPENAI_API_KEY",
         }
         agent_env = {k: v for k, v in os.environ.items() if k not in _sensitive_vars}
 
@@ -824,14 +930,26 @@ async def triage_issue(title: str, body: str, config: Config) -> tuple[str, str]
         cleaned = line.strip().strip("*_").strip()
         upper = cleaned.upper()
         if upper.startswith("MODEL: OPUS"):
-            reason = cleaned.split("—", 1)[-1].strip() if "—" in cleaned else cleaned.split("-", 1)[-1].strip() if "- " in cleaned else "classified as complex"
+            reason = (
+                cleaned.split("—", 1)[-1].strip()
+                if "—" in cleaned
+                else cleaned.split("-", 1)[-1].strip()
+                if "- " in cleaned
+                else "classified as complex"
+            )
             return "opus", reason
         elif upper.startswith("MODEL: SONNET"):
-            reason = cleaned.split("—", 1)[-1].strip() if "—" in cleaned else cleaned.split("-", 1)[-1].strip() if "- " in cleaned else "classified as straightforward"
+            reason = (
+                cleaned.split("—", 1)[-1].strip()
+                if "—" in cleaned
+                else cleaned.split("-", 1)[-1].strip()
+                if "- " in cleaned
+                else "classified as straightforward"
+            )
             return "sonnet", reason
 
     log.warning("Could not parse triage output, defaulting to %s: %s", config.default_model, output[:200])
-    return config.default_model, f"unparseable triage output"
+    return config.default_model, "unparseable triage output"
 
 
 BATCH_ORCHESTRATE_PROMPT_TEMPLATE = """\
@@ -867,7 +985,9 @@ Respond with ONLY a JSON array, no markdown fences:
 
 
 async def orchestrate_batch(
-    issues: list[dict], repo_name: str, config: Config,
+    issues: list[dict],
+    repo_name: str,
+    config: Config,
 ) -> list[dict] | None:
     """Batch-orchestrate multiple issues via haiku. Returns list of dicts with
     issue_number, model, priority, depends_on, reason. Returns None on failure."""
@@ -886,17 +1006,29 @@ async def orchestrate_batch(
 
     if config.agent_user:
         cmd = [
-            "sudo", "-u", config.agent_user, "--",
-            "prlimit", "--nproc=500", "--fsize=2147483648", "--",
+            "sudo",
+            "-u",
+            config.agent_user,
+            "--",
+            "prlimit",
+            "--nproc=500",
+            "--fsize=2147483648",
+            "--",
             *cmd,
         ]
         agent_env = None
     else:
         _sensitive_vars = {
-            "CLAUDECODE", "SSH_AUTH_SOCK", "SSH_AGENT_PID",
-            "GIT_ASKPASS", "GIT_CREDENTIALS", "GITHUB_TOKEN",
-            "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN",
-            "ANTHROPIC_API_KEY", "OPENAI_API_KEY",
+            "CLAUDECODE",
+            "SSH_AUTH_SOCK",
+            "SSH_AGENT_PID",
+            "GIT_ASKPASS",
+            "GIT_CREDENTIALS",
+            "GITHUB_TOKEN",
+            "AWS_SECRET_ACCESS_KEY",
+            "AWS_SESSION_TOKEN",
+            "ANTHROPIC_API_KEY",
+            "OPENAI_API_KEY",
         }
         agent_env = {k: v for k, v in os.environ.items() if k not in _sensitive_vars}
 
@@ -961,25 +1093,29 @@ async def orchestrate_batch(
         if depends_on is not None and depends_on not in issue_numbers:
             depends_on = None
         reason = entry.get("reason", "")
-        validated.append({
-            "issue_number": num,
-            "model": model,
-            "priority": priority,
-            "depends_on": depends_on,
-            "reason": str(reason)[:200],
-        })
+        validated.append(
+            {
+                "issue_number": num,
+                "model": model,
+                "priority": priority,
+                "depends_on": depends_on,
+                "reason": str(reason)[:200],
+            }
+        )
 
     # Fill in any issues the orchestrator omitted
     seen_numbers = {e["issue_number"] for e in validated}
     for iss in issues:
         if iss["number"] not in seen_numbers:
-            validated.append({
-                "issue_number": iss["number"],
-                "model": config.default_model,
-                "priority": 100,
-                "depends_on": None,
-                "reason": "omitted by orchestrator, using defaults",
-            })
+            validated.append(
+                {
+                    "issue_number": iss["number"],
+                    "model": config.default_model,
+                    "priority": 100,
+                    "depends_on": None,
+                    "reason": "omitted by orchestrator, using defaults",
+                }
+            )
 
     return validated
 
@@ -1005,9 +1141,16 @@ async def sync_agent_credentials(config: Config):
     if need_sync:
         log.info("Syncing Claude credentials to %s", config.agent_user)
         rc, _, err = await run_cmd(
-            "sudo", "install", "-m", "600",
-            "-o", config.agent_user, "-g", "backporcher",
-            str(admin_cred), str(agent_cred),
+            "sudo",
+            "install",
+            "-m",
+            "600",
+            "-o",
+            config.agent_user,
+            "-g",
+            "backporcher",
+            str(admin_cred),
+            str(agent_cred),
         )
         if rc != 0:
             log.warning("Failed to sync credentials: %s", err.strip())
@@ -1042,7 +1185,9 @@ Respond with ONLY a JSON object (no markdown fences):
 
 
 async def check_task_conflict(
-    task_prompt: str, inflight_tasks: list[dict], config: Config,
+    task_prompt: str,
+    inflight_tasks: list[dict],
+    config: Config,
 ) -> dict | None:
     """Check if a new task conflicts with in-flight tasks. Returns conflict info or None.
 
@@ -1053,9 +1198,7 @@ async def check_task_conflict(
 
     summaries = []
     for t in inflight_tasks:
-        summaries.append(
-            f"- Task #{t['id']} ({t['status']}): {t['prompt'][:200]}"
-        )
+        summaries.append(f"- Task #{t['id']} ({t['status']}): {t['prompt'][:200]}")
     inflight_text = "\n".join(summaries)
 
     prompt = CONFLICT_CHECK_PROMPT_TEMPLATE.format(
@@ -1067,17 +1210,29 @@ async def check_task_conflict(
 
     if config.agent_user:
         cmd = [
-            "sudo", "-u", config.agent_user, "--",
-            "prlimit", "--nproc=500", "--fsize=2147483648", "--",
+            "sudo",
+            "-u",
+            config.agent_user,
+            "--",
+            "prlimit",
+            "--nproc=500",
+            "--fsize=2147483648",
+            "--",
             *cmd,
         ]
         agent_env = None
     else:
         _sensitive_vars = {
-            "CLAUDECODE", "SSH_AUTH_SOCK", "SSH_AGENT_PID",
-            "GIT_ASKPASS", "GIT_CREDENTIALS", "GITHUB_TOKEN",
-            "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN",
-            "ANTHROPIC_API_KEY", "OPENAI_API_KEY",
+            "CLAUDECODE",
+            "SSH_AUTH_SOCK",
+            "SSH_AGENT_PID",
+            "GIT_ASKPASS",
+            "GIT_CREDENTIALS",
+            "GITHUB_TOKEN",
+            "AWS_SECRET_ACCESS_KEY",
+            "AWS_SESSION_TOKEN",
+            "ANTHROPIC_API_KEY",
+            "OPENAI_API_KEY",
         }
         agent_env = {k: v for k, v in os.environ.items() if k not in _sensitive_vars}
 
@@ -1145,7 +1300,10 @@ async def dispatch_task(task: dict, config: Config, db: Database):
             await db.update_task(task_id, branch_name=branch)
             await db.add_log(task_id, f"Creating worktree on branch {branch}")
             worktree_path = await setup_worktree(
-                repo_path, task_id, branch, repo["default_branch"],
+                repo_path,
+                task_id,
+                branch,
+                repo["default_branch"],
             )
             await db.update_task(task_id, worktree_path=str(worktree_path))
 
@@ -1161,8 +1319,10 @@ async def dispatch_task(task: dict, config: Config, db: Database):
             model_used=task["model"],
         )
         await db.record_metric(
-            "agent_start", task_id=task_id,
-            repo=task.get("repo_name"), model=task["model"],
+            "agent_start",
+            task_id=task_id,
+            repo=task.get("repo_name"),
+            model=task["model"],
         )
 
         # Run agent
@@ -1199,17 +1359,22 @@ async def dispatch_task(task: dict, config: Config, db: Database):
                 reason = f"exit {exit_code}"
                 await db.add_log(
                     task_id,
-                    f"Agent failed ({reason}), retry {new_count}/{max_retries} "
-                    f"(model={new_model})",
+                    f"Agent failed ({reason}), retry {new_count}/{max_retries} (model={new_model})",
                     level="warn",
                 )
                 log.info(
                     "Task %d: agent failed (%s), retry %d/%d (model=%s)",
-                    task_id, reason, new_count, max_retries, new_model,
+                    task_id,
+                    reason,
+                    new_count,
+                    max_retries,
+                    new_model,
                 )
                 await db.record_metric(
-                    "retry_agent", task_id=task_id,
-                    repo=task.get("repo_name"), model=new_model,
+                    "retry_agent",
+                    task_id=task_id,
+                    repo=task.get("repo_name"),
+                    model=new_model,
                 )
                 return
 
@@ -1223,7 +1388,8 @@ async def dispatch_task(task: dict, config: Config, db: Database):
             )
             await db.add_log(task_id, f"Agent failed (exit {exit_code}), retries exhausted", level="error")
             await _mark_issue_failed(
-                task, db,
+                task,
+                db,
                 f"Agent failed with exit code {exit_code} (retries exhausted).",
             )
             await cleanup_task_artifacts(task, db)
@@ -1237,7 +1403,11 @@ async def dispatch_task(task: dict, config: Config, db: Database):
         if verify_command:
             for attempt in range(1, config.max_verify_retries + 2):  # +2: initial + retries
                 passed, verify_output = await run_verify(
-                    worktree_path, verify_command, task_id, db, config,
+                    worktree_path,
+                    verify_command,
+                    task_id,
+                    db,
+                    config,
                 )
                 if passed:
                     break
@@ -1245,7 +1415,8 @@ async def dispatch_task(task: dict, config: Config, db: Database):
                 if attempt > config.max_verify_retries:
                     now = datetime.now(timezone.utc).isoformat()
                     await db.update_task(
-                        task_id, status="failed",
+                        task_id,
+                        status="failed",
                         error_message=f"Verify failed after {config.max_verify_retries} fix attempts",
                         completed_at=now,
                     )
@@ -1255,7 +1426,8 @@ async def dispatch_task(task: dict, config: Config, db: Database):
                         level="error",
                     )
                     await _mark_issue_failed(
-                        task, db,
+                        task,
+                        db,
                         f"Build verification failed after {config.max_verify_retries} fix attempts.",
                     )
                     await cleanup_task_artifacts(task, db)
@@ -1282,9 +1454,7 @@ async def dispatch_task(task: dict, config: Config, db: Database):
                 exit_code, summary = await run_agent(fix_task, worktree_path, config, db)
                 if exit_code != 0:
                     # Let the outer exception handler deal with retry/escalation
-                    raise RuntimeError(
-                        f"Verify fix agent exited with code {exit_code}"
-                    )
+                    raise RuntimeError(f"Verify fix agent exited with code {exit_code}")
 
         # Create PR
         await db.add_log(task_id, "Creating pull request...")
@@ -1295,7 +1465,10 @@ async def dispatch_task(task: dict, config: Config, db: Database):
 
         if pr_url:
             await db.update_task(
-                task_id, status="pr_created", pr_url=pr_url, completed_at=now,
+                task_id,
+                status="pr_created",
+                pr_url=pr_url,
+                completed_at=now,
             )
             await db.add_log(task_id, f"PR created: {pr_url}")
 
@@ -1304,12 +1477,15 @@ async def dispatch_task(task: dict, config: Config, db: Database):
             if issue_num:
                 repo_full = repo_full_name_from_url(repo["github_url"])
                 await comment_on_issue(
-                    repo_full, issue_num,
+                    repo_full,
+                    issue_num,
                     f"PR created: {pr_url}\n\nAwaiting CI checks.",
                 )
         else:
             await db.update_task(
-                task_id, status="completed", completed_at=now,
+                task_id,
+                status="completed",
+                completed_at=now,
             )
             await db.add_log(task_id, "Completed (no changes)")
             await cleanup_task_artifacts(task, db)
@@ -1335,17 +1511,21 @@ async def dispatch_task(task: dict, config: Config, db: Database):
             )
             await db.add_log(
                 task_id,
-                f"Error, retry {new_count}/{config.max_task_retries} "
-                f"(model={new_model}): {err_str[:200]}",
+                f"Error, retry {new_count}/{config.max_task_retries} (model={new_model}): {err_str[:200]}",
                 level="warn",
             )
             log.info(
                 "Task %d: error, retry %d/%d (model=%s)",
-                task_id, new_count, config.max_task_retries, new_model,
+                task_id,
+                new_count,
+                config.max_task_retries,
+                new_model,
             )
             await db.record_metric(
-                "retry_agent", task_id=task_id,
-                repo=task.get("repo_name"), model=new_model,
+                "retry_agent",
+                task_id=task_id,
+                repo=task.get("repo_name"),
+                model=new_model,
             )
         else:
             await db.update_task(
@@ -1356,7 +1536,8 @@ async def dispatch_task(task: dict, config: Config, db: Database):
             )
             await db.add_log(task_id, f"Fatal error (retries exhausted): {e}", level="error")
             await _mark_issue_failed(
-                task, db,
+                task,
+                db,
                 f"Task failed with error: {err_str[:300]}",
             )
             await cleanup_task_artifacts(task, db)
