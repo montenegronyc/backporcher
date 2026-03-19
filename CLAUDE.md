@@ -32,7 +32,7 @@ The worker daemon (`src/worker.py`) runs up to 6 async loops via `asyncio.gather
 3. **Coordinator Reviewer** (every 15s) — reviews each PR diff via `claude -p`, checks for conflicts with other open PRs, approves or rejects. Backfills missing `pr_number` from `pr_url`
 4. **CI Monitor** (every 60s) — checks CI status on approved PRs, auto-merges passing PRs (squash), auto-retries failures with CI log context, closes GitHub issues on success
 5. **Artifact Cleanup** (every 5 min) — removes worktrees and remote branches for terminal tasks older than 10 minutes
-6. **Dashboard** (optional) — aiohttp web server with HTTP Basic Auth, real-time SSE updates every 5s. Steel glass theme: high-contrast steel gray, translucent panels with backdrop blur, SF Pro + system font typography, pulsing badges for active states, orange success ring gauges. Only starts when `BACKPORCHER_DASHBOARD_PASSWORD` is set. Features: inline Approve/Hold/Reject/Escalate/Re-queue buttons, task detail panel with timeline, edit modal for prompt/model/priority rewriting, pipeline summary with metrics (merged count, success rate, avg time, retry rate), global Pause/Resume toggle. API: `POST /api/tasks/{id}/approve|hold|reject|edit|requeue|escalate`, `POST /api/pause|resume`, `GET /api/stats`
+6. **Dashboard** (optional) — aiohttp web server with HTTP Basic Auth, real-time SSE updates every 5s. Warm light theme: cream/beige base (#F5F5DC), translucent glass panels with backdrop blur, SF Pro + system font typography, pulsing badges for active states, warm red-orange success ring gauges. Theme CSS served from `backporcher-theme.css` (editable without restart). Only starts when `BACKPORCHER_DASHBOARD_PASSWORD` is set. Features: inline Approve/Hold/Reject/Escalate/Re-queue buttons, task detail panel with timeline, edit modal for prompt/model/priority rewriting, pipeline summary with metrics (merged count, success rate, avg time, retry rate), global Pause/Resume toggle. API: `POST /api/tasks/{id}/approve|hold|reject|edit|requeue|escalate`, `POST /api/pause|resume`, `GET /api/stats`
 
 ## Task Status Flow
 
@@ -72,8 +72,8 @@ Controls how much human oversight the pipeline requires. Set via `BACKPORCHER_AP
 |------|---------|
 | `src/cli.py` | CLI entry point: `fleet`, `status`, `stats`, `cancel`, `cleanup`, `approve`, `hold`, `release`, `pause`, `resume`, `repo` (incl. `learnings`), `worker` |
 | `src/worker.py` | Background daemon — 6 async loops, graceful shutdown, startup recovery, preflight checks |
-| `src/dashboard.py` | aiohttp web dashboard: HTTP Basic Auth, SSE real-time updates, JSON API, steel glass theme (high-contrast gray), task control (approve/hold/reject/edit/requeue/escalate) |
-| `backporcher-theme.css` | CSS design tokens and classes for the steel gray dashboard theme (reference file — inlined in dashboard.py) |
+| `src/dashboard.py` | aiohttp web dashboard: HTTP Basic Auth, SSE real-time updates, JSON API, warm light theme (cream/beige, CSS in backporcher-theme.css), task control (approve/hold/reject/edit/requeue/escalate) |
+| `backporcher-theme.css` | Warm light theme CSS (cream/beige palette) — served by dashboard at `/theme.css`, editable without restart |
 | `src/graph/` | Code dependency graph: Tree-sitter parser, SQLite graph store, incremental update, blast radius context builder, navigation context |
 | `src/graph/context.py` | Backporcher integration layer: `ensure_graph()`, `build_review_context()`, `build_navigation_context()`, prompt injection sanitization, path traversal checks |
 | `src/dispatcher.py` | Worktree setup, credential sync, navigation context generation, agent execution (structured prompt: stack + learnings + navigation + task), build verification, PR creation, coordinator review runner (with graph context), CI retry, transient failure auto-retry, stack detection, learning loop |
