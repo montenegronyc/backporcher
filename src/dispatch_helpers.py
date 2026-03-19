@@ -17,7 +17,7 @@ from .github import comment_on_issue, repo_full_name_from_url, update_issue_labe
 log = logging.getLogger("backporcher.dispatch")
 
 
-async def mark_issue_failed(task: dict, db: Database, reason: str):
+async def _mark_issue_failed(task: dict, db: Database, reason: str):
     """Update GitHub labels on the source issue when a task permanently fails.
 
     Moves from backporcher-in-progress -> backporcher-failed and posts a comment.
@@ -79,7 +79,7 @@ async def sync_agent_credentials(config: Config):
             log.warning("Failed to sync credentials: %s", err.strip())
 
 
-def pick_retry_model(current_model: str, retry_count: int) -> str:
+def _pick_retry_model(current_model: str, retry_count: int) -> str:
     """Escalate model on retry. Sonnet -> opus after first attempt."""
     if current_model == "sonnet" and retry_count >= 1:
         log.info("Model escalation: sonnet -> opus (retry %d)", retry_count)
@@ -134,7 +134,7 @@ async def retry_with_ci_context(
             error_message=f"Retry agent exited with code {exit_code}",
             completed_at=now,
         )
-        await mark_issue_failed(
+        await _mark_issue_failed(
             task,
             db,
             f"CI retry agent failed with exit code {exit_code}.",

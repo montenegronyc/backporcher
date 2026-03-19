@@ -9,6 +9,8 @@ now live in dispatch.py, agent.py, repo_intel.py, prompts.py, triage.py, review.
 from .agent import run_agent as run_agent  # noqa: F811
 from .agent import run_verify as run_verify  # noqa: F811
 from .dispatch import dispatch_task as dispatch_task  # noqa: F811
+from .dispatch_helpers import _mark_issue_failed as _mark_issue_failed  # noqa: F811
+from .dispatch_helpers import _pick_retry_model as _pick_retry_model  # noqa: F811
 from .dispatch_helpers import retry_with_ci_context as retry_with_ci_context  # noqa: F811
 from .dispatch_helpers import sync_agent_credentials as sync_agent_credentials  # noqa: F811
 

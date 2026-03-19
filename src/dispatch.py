@@ -11,7 +11,7 @@ from .constants import (
     TRUNCATE_REVIEW_OUTPUT,
 )
 from .db import Database
-from .dispatch_helpers import mark_issue_failed, pick_retry_model, sync_agent_credentials
+from .dispatch_helpers import _mark_issue_failed, _pick_retry_model, sync_agent_credentials
 from .git_ops import (
     _get_repo_lock,
     cleanup_task_artifacts,
@@ -92,7 +92,7 @@ async def dispatch_task(task: dict, config: Config, db: Database):
 
             if retry_count < max_retries:
                 new_count = retry_count + 1
-                new_model = pick_retry_model(task["model"], new_count)
+                new_model = _pick_retry_model(task["model"], new_count)
                 await db.update_task(
                     task_id,
                     status="queued",
@@ -141,7 +141,7 @@ async def dispatch_task(task: dict, config: Config, db: Database):
                 "agent_failure",
                 f"Agent failed (exit {exit_code}) on: {task['prompt'][:TRUNCATE_REASON]}",
             )
-            await mark_issue_failed(
+            await _mark_issue_failed(
                 task,
                 db,
                 f"Agent failed with exit code {exit_code} (retries exhausted).",
@@ -186,7 +186,7 @@ async def dispatch_task(task: dict, config: Config, db: Database):
                         "verify_failure",
                         f"Build verification failed ({verify_command}) on: {task['prompt'][:TRUNCATE_REASON]}",
                     )
-                    await mark_issue_failed(
+                    await _mark_issue_failed(
                         task,
                         db,
                         f"Build verification failed after {config.max_verify_retries} fix attempts.",
@@ -259,7 +259,7 @@ async def dispatch_task(task: dict, config: Config, db: Database):
         retry_count = task.get("retry_count", 0)
         if retry_count < config.max_task_retries:
             new_count = retry_count + 1
-            new_model = pick_retry_model(task.get("model", "sonnet"), new_count)
+            new_model = _pick_retry_model(task.get("model", "sonnet"), new_count)
             await db.update_task(
                 task_id,
                 status="queued",
@@ -296,7 +296,7 @@ async def dispatch_task(task: dict, config: Config, db: Database):
                 completed_at=now,
             )
             await db.add_log(task_id, f"Fatal error (retries exhausted): {e}", level="error")
-            await mark_issue_failed(
+            await _mark_issue_failed(
                 task,
                 db,
                 f"Task failed with error: {err_str[:TRUNCATE_REASON]}",
