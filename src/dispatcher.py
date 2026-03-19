@@ -596,9 +596,7 @@ async def run_review(
             store = await ensure_graph(repo_local_path)
             if store:
                 try:
-                    pr_diff, blast_radius_text = build_review_context(
-                        store, pr_diff, repo_local_path
-                    )
+                    pr_diff, blast_radius_text = build_review_context(store, pr_diff, repo_local_path)
                 finally:
                     store.close()
         except Exception:
