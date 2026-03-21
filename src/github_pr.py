@@ -53,7 +53,15 @@ async def get_pr_ci_status(
             completed += 1
             if conclusion and conclusion not in ("SUCCESS", "NEUTRAL", "SKIPPED"):
                 failed.append(name)
-        # else: still pending
+        elif check.get("__typename") == "StatusContext":
+            # StatusContext (e.g. CodeRabbit) uses a top-level `state` field, not `conclusion`
+            state_val = (check.get("state") or "").upper()
+            if state_val in ("SUCCESS", "NEUTRAL"):
+                completed += 1
+            elif state_val in ("FAILURE", "ERROR"):
+                completed += 1
+                failed.append(name)
+            # PENDING stays as-is (still pending)
 
     if completed < total:
         state = "pending"
