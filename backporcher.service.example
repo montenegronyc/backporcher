@@ -20,6 +20,13 @@ ExecStart=/home/YOUR_USER/backporcher/.venv/bin/backporcher worker
 Restart=on-failure
 RestartSec=10
 
+# File descriptor limit — Claude Code agent spawns Node.js worker threads
+# which require more than the default systemd/shell limit of 1024.
+# Without this, agents fail immediately with:
+#   Assertion failed: (0) == (uv_thread_create(...))
+# 65536 is a safe value that covers concurrent agents (each ~200 fds).
+LimitNOFILE=65536
+
 # Environment — edit these for your setup
 Environment=BACKPORCHER_BASE_DIR=/home/YOUR_USER/backporcher
 Environment=BACKPORCHER_MAX_CONCURRENCY=2
