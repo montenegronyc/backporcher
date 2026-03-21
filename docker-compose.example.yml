@@ -1,0 +1,49 @@
+name: backporcher
+
+# Docker Compose example for backporcher.
+#
+# Before starting:
+#   1. Copy this file to docker-compose.yml
+#   2. Create a .env file with the required variables (see comments below)
+#   3. Log in to Claude Code as the agent user once:
+#        docker compose run --rm backporcher \
+#          su -s /bin/sh backporcher-agent -c "HOME=/home/backporcher-agent claude auth login"
+#      Then paste the URL into your browser and follow the prompts.
+#      Credentials are stored at ./claude-config/.credentials.json and persist across restarts.
+
+volumes:
+  workspace:
+
+services:
+  backporcher:
+    image: montenegronyc/backporcher:latest
+    container_name: backporcher
+    ports:
+      - "0.0.0.0:8765:8080"
+    volumes:
+      # Host workspace — repos are cloned here by the agent
+      - /home/${USER}:/workspace:rw
+      # Claude Code config + OAuth credentials for the agent user.
+      # The credentials.json is written by `claude auth login` and auto-refreshed.
+      - ./claude-config:/home/backporcher-agent/.claude:rw
+    environment:
+      - GITHUB_TOKEN               # GitHub PAT with repo + pull_request scopes
+      - BACKPORCHER_APPROVAL_MODE=review-merge
+      - BACKPORCHER_ALLOWED_USERS=${GITHUB_USERNAME}
+      - BACKPORCHER_AGENT_USER=backporcher-agent
+      - BACKPORCHER_MAX_CONCURRENCY=3
+      - BACKPORCHER_DASHBOARD_PASSWORD
+      # Note: ANTHROPIC_API_KEY is intentionally omitted.
+      # The Claude Code agent authenticates via OAuth credentials in ./claude-config/
+    restart: unless-stopped
+    privileged: true              # Required for cgroup delegation (agent sandboxing)
+    ulimits:
+      nofile:
+        soft: 65536               # REQUIRED: default Docker limit of 1024 causes
+        hard: 524288              # uv_thread_create assertion failure in Node.js
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8080/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
