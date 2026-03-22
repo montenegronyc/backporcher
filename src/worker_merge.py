@@ -28,6 +28,12 @@ def compute_duration(start: str | None, end: str | None) -> float | None:
     try:
         s = datetime.fromisoformat(start.replace("Z", "+00:00"))
         e = datetime.fromisoformat(end.replace("Z", "+00:00"))
+        # SQLite datetime('now') produces naive timestamps (no tzinfo).
+        # Treat naive timestamps as UTC to avoid offset-naive vs offset-aware errors.
+        if s.tzinfo is None:
+            s = s.replace(tzinfo=timezone.utc)
+        if e.tzinfo is None:
+            e = e.replace(tzinfo=timezone.utc)
         return (e - s).total_seconds()
     except (ValueError, AttributeError):
         return None
