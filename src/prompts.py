@@ -37,11 +37,17 @@ Output ONLY a JSON array, no markdown fences:
 """
 
 TRIAGE_PROMPT_TEMPLATE = """\
-You are a task complexity classifier for a code agent system. Given a GitHub issue, decide which AI model should work on it.
+You are a task complexity classifier for a code agent system. Given a GitHub issue, decide which AI agent and model should work on it.
 
 ## Models Available
 - **sonnet**: Fast, cheap. Good for: bug fixes, single-file changes, config tweaks, adding a flag/parameter, documentation, straightforward implementations with clear instructions.
 - **opus**: Slower, expensive, but much more capable. Required for: multi-file refactors, architectural changes, new subsystems, state management rewrites, complex feature implementations requiring design decisions, anything involving "extract", "redesign", "rewrite", or decomposition of large files.
+
+## Agents Available
+Available agents: {enabled_agents}
+- **claude**: Most capable. Complex multi-file changes, architectural work, cross-file reasoning. Most expensive.
+- **kimi**: Good general capability, cost-effective. Single/multi-file changes, bug fixes.
+- **codex**: OpenAI-backed. Straightforward implementations, boilerplate.
 
 ## Issue
 **Title:** {title}
@@ -55,10 +61,7 @@ Analyze the issue scope and complexity. Consider:
 3. Is it a patch/fix or a structural change?
 4. How much code will likely be written (< 100 lines = sonnet, > 300 lines = opus)?
 
-Respond with exactly one line in this format:
-MODEL: sonnet — {{reason}}
-or
-MODEL: opus — {{reason}}
+Respond with exactly one line: AGENT: <agent> MODEL: <model> \u2014 {{reason}}
 """
 
 BATCH_ORCHESTRATE_PROMPT_TEMPLATE = """\
@@ -69,14 +72,21 @@ for the same repository, analyze them together and produce a plan.
 - **sonnet**: Fast, cheap. Bug fixes, single-file changes, config tweaks, docs.
 - **opus**: Slower, expensive. Multi-file refactors, architectural changes, complex features.
 
+## Agents Available
+Available agents: {enabled_agents}
+- **claude**: Most capable. Complex multi-file changes, architectural work.
+- **kimi**: Cost-effective. Single/multi-file changes, bug fixes.
+- **codex**: OpenAI-backed. Straightforward implementations, boilerplate.
+
 ## Issues (same repo: {repo_name})
 {issues_block}
 
 ## Instructions
 For each issue, determine:
-1. **model**: "sonnet" or "opus"
-2. **priority**: integer 1 to {n_issues}. 1 = run first. No duplicates.
-3. **depends_on**: issue number this depends on, or null. Use when changes would conflict \
+1. **agent**: one of the available agents listed above
+2. **model**: "sonnet" or "opus"
+3. **priority**: integer 1 to {n_issues}. 1 = run first. No duplicates.
+4. **depends_on**: issue number this depends on, or null. Use when changes would conflict \
 or build upon another issue. Chains are fine (A -> B -> C). No circular dependencies.
 
 Rules:
@@ -87,8 +97,8 @@ Rules:
 ## Response Format
 Respond with ONLY a JSON array, no markdown fences:
 [
-  {{"issue_number": 1, "model": "sonnet", "priority": 1, "depends_on": null, "reason": "..."}},
-  {{"issue_number": 2, "model": "opus", "priority": 2, "depends_on": 1, "reason": "..."}}
+  {{"issue_number": 1, "agent": "claude", "model": "sonnet", "priority": 1, "depends_on": null, "reason": "..."}},
+  {{"issue_number": 2, "agent": "kimi", "model": "opus", "priority": 2, "depends_on": 1, "reason": "..."}}
 ]
 """
 

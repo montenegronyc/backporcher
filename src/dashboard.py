@@ -1,5 +1,7 @@
 """Real-time web dashboard for Backporcher — aiohttp + SSE, no frontend build step."""
 
+from __future__ import annotations
+
 import asyncio
 import base64
 import logging

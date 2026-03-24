@@ -1,9 +1,12 @@
 """Dispatch: main task dispatch lifecycle."""
 
+from __future__ import annotations
+
 import logging
 from datetime import datetime, timezone
 
 from .agent import run_agent, run_verify
+from .backends import AgentBackend, discover_backends
 from .config import Config
 from .constants import (
     TRUNCATE_ERROR_MESSAGE,
@@ -11,7 +14,12 @@ from .constants import (
     TRUNCATE_REVIEW_OUTPUT,
 )
 from .db import Database
-from .dispatch_helpers import _mark_issue_failed, _pick_retry_model, sync_agent_credentials
+from .dispatch_helpers import (
+    _mark_issue_failed,
+    _pick_fallback_agent,
+    _pick_retry_model,
+    sync_agent_credentials,
+)
 from .git_ops import (
     _get_repo_lock,
     cleanup_task_artifacts,
@@ -27,9 +35,19 @@ from .review import create_pr
 log = logging.getLogger("backporcher.dispatch")
 
 
-async def dispatch_task(task: dict, config: Config, db: Database):
+async def dispatch_task(
+    task: dict,
+    config: Config,
+    db: Database,
+    backends: dict[str, AgentBackend] | None = None,
+):
     """Full lifecycle: fetch -> worktree -> agent -> PR."""
     task_id = task["id"]
+
+    # Resolve backend registry (lazily discover if not passed)
+    if backends is None:
+        backends = discover_backends(config)
+
     try:
         repo = await db.get_repo(task["repo_id"])
         if not repo:
@@ -57,6 +75,10 @@ async def dispatch_task(task: dict, config: Config, db: Database):
         # Ensure agent credentials are fresh before launching
         await sync_agent_credentials(config)
 
+        # Resolve the backend for this task (fall back to default if unknown)
+        task_agent = task.get("agent", config.default_agent)
+        backend = backends.get(task_agent) or backends.get(config.default_agent)
+
         # Record agent start timing and model info
         agent_start_now = datetime.now(timezone.utc).isoformat()
         await db.update_task(
@@ -74,7 +96,7 @@ async def dispatch_task(task: dict, config: Config, db: Database):
 
         # Run agent
         await db.add_log(task_id, "Running agent...")
-        exit_code, summary = await run_agent(task, worktree_path, config, db)
+        exit_code, summary = await run_agent(task, worktree_path, config, db, backend=backend)
 
         # Record agent finish timing
         agent_finish_now = datetime.now(timezone.utc).isoformat()
@@ -125,7 +147,44 @@ async def dispatch_task(task: dict, config: Config, db: Database):
                 )
                 return
 
-            # Max retries exhausted -- permanent failure
+            # Retries exhausted -- try agent fallback before permanent failure
+            fallback_count = task.get("agent_fallback_count", 0) or 0
+            next_agent = _pick_fallback_agent(task, config)
+            if next_agent and next_agent in backends:
+                new_fallback = fallback_count + 1
+                await db.update_task(
+                    task_id,
+                    status="queued",
+                    error_message=None,
+                    started_at=None,
+                    branch_name=None,
+                    worktree_path=None,
+                    retry_count=0,
+                    agent=next_agent,
+                    agent_fallback_count=new_fallback,
+                    model=config.default_model,
+                )
+                await db.add_log(
+                    task_id,
+                    f"Agent fallback: {task_agent} -> {next_agent} (fallback {new_fallback})",
+                    level="warn",
+                )
+                log.info(
+                    "Task %d: agent fallback %s -> %s (fallback %d)",
+                    task_id,
+                    task_agent,
+                    next_agent,
+                    new_fallback,
+                )
+                await db.record_metric(
+                    "agent_fallback",
+                    task_id=task_id,
+                    repo=task.get("repo_name"),
+                    model=config.default_model,
+                )
+                return
+
+            # Max retries + fallback exhausted -- permanent failure
             now = datetime.now(timezone.utc).isoformat()
             await db.update_task(
                 task_id,
@@ -212,7 +271,7 @@ async def dispatch_task(task: dict, config: Config, db: Database):
                 )
                 fix_task = dict(task)
                 fix_task["prompt"] = fix_prompt
-                exit_code, summary = await run_agent(fix_task, worktree_path, config, db)
+                exit_code, summary = await run_agent(fix_task, worktree_path, config, db, backend=backend)
                 if exit_code != 0:
                     # Let the outer exception handler deal with retry/escalation
                     raise RuntimeError(f"Verify fix agent exited with code {exit_code}")

@@ -5,6 +5,7 @@ import logging
 import signal
 
 from . import notifications
+from .backends import discover_backends
 from .config import Config, load_config
 from .db import Database
 from .dispatcher import dispatch_task
@@ -37,6 +38,7 @@ class WorkerDaemon:
         self.semaphore = asyncio.Semaphore(config.max_workers)
         self._running = False
         self._tasks: set[asyncio.Task] = set()
+        self.backends = discover_backends(config)
 
     async def run(self):
         """Launch concurrent loops (4 core + optional dashboard)."""
@@ -108,7 +110,7 @@ class WorkerDaemon:
     async def _run_with_semaphore(self, task: dict):
         async with self.semaphore:
             try:
-                await dispatch_task(task, self.config, self.db)
+                await dispatch_task(task, self.config, self.db, backends=self.backends)
             except Exception:
                 log.exception("Unhandled error dispatching task %d", task["id"])
             finally:

@@ -1,5 +1,7 @@
 """SQLite database layer with WAL mode and parameterized queries."""
 
+from __future__ import annotations
+
 import asyncio
 import sqlite3
 from datetime import datetime, timezone

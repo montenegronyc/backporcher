@@ -1,5 +1,7 @@
 """CLI task commands: fleet, status, cancel, cleanup."""
 
+from __future__ import annotations
+
 import os
 import signal
 import subprocess

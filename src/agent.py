@@ -1,17 +1,18 @@
 """Agent execution: prompt building, agent runner, build verification."""
 
+from __future__ import annotations
+
 import asyncio
-import json
 import logging
 import os
 import signal
 from pathlib import Path
 
+from .backends import AgentBackend, AgentEvent
 from .config import Config
 from .constants import (
     MAX_OUTPUT_BYTES,
     READLINE_LIMIT,
-    SENSITIVE_ENV_VARS,
     TIMEOUT_VERIFY_AGENT,
     TRUNCATE_LOG_LINE,
     TRUNCATE_OUTPUT_TAIL,
@@ -32,12 +33,19 @@ async def run_agent(
     worktree_path: Path,
     config: Config,
     db: Database,
+    backend: AgentBackend | None = None,
 ) -> tuple[int, str | None]:
     """
-    Run claude -p in the worktree. Streams stdout to log file.
+    Run an agent backend in the worktree. Streams stdout to log file.
     Returns (exit_code, output_summary).
-    Uses Max subscription -- no --max-budget-usd flag.
+
+    If *backend* is None, defaults to ClaudeBackend for backward compatibility.
     """
+    if backend is None:
+        from .backends.claude import ClaudeBackend  # noqa: PLC0415
+
+        backend = ClaudeBackend()
+
     # Build structured prompt with stack info, learnings, and navigation context
     project_context = ""
     learnings_section = ""
@@ -68,42 +76,40 @@ async def run_agent(
     model = task["model"]
     log_file = config.logs_dir / f"{task['id']}.jsonl"
 
-    cmd = [
-        "claude",
-        "-p",
-        "--output-format",
-        "stream-json",
-        "--verbose",
-        "--dangerously-skip-permissions",
-        "--model",
-        model,
-        prompt,
-    ]
+    cmd = backend.build_command(prompt, model, worktree_path)
 
     # Sandbox: wrap with sudo -u + prlimit when agent_user is configured
     if config.agent_user:
+        # Inject backend-required env vars via --preserve-env if any
+        required_vars = backend.required_env_vars()
+        preserve_args: list[str] = []
+        if required_vars:
+            # Set the vars in current env so sudo can preserve them
+            for k, v in required_vars.items():
+                os.environ[k] = v
+            preserve_args = [f"--preserve-env={','.join(required_vars.keys())}"]
         cmd = [
             "sudo",
             "-u",
             config.agent_user,
+            *preserve_args,
             "--",
             *prlimit_args(),
             *cmd,
         ]
         agent_env = None  # Let sudo reset env to target user's defaults
     else:
-        # Clean env: strip sensitive vars and CLAUDECODE (nested-session detection)
-        _sensitive_vars = SENSITIVE_ENV_VARS | {
-            "CLAUDECODE",
-            "SSH_AUTH_SOCK",
-            "SSH_AGENT_PID",
-            "GIT_ASKPASS",
-            "GIT_CREDENTIALS",
-        }
-        agent_env = {k: v for k, v in os.environ.items() if k not in _sensitive_vars}
+        agent_env = backend.build_env(dict(os.environ))
 
-    log.info("Starting agent for task %d (model=%s, user=%s)", task["id"], model, config.agent_user or "self")
-    await db.add_log(task["id"], f"Starting agent with model={model}")
+    agent_name = backend.name
+    log.info(
+        "Starting agent for task %d (agent=%s, model=%s, user=%s)",
+        task["id"],
+        agent_name,
+        model,
+        config.agent_user or "self",
+    )
+    await db.add_log(task["id"], f"Starting agent={agent_name} with model={model}")
 
     proc = await asyncio.create_subprocess_exec(
         *cmd,
@@ -134,38 +140,23 @@ async def run_agent(
                 lf.write(line + "\n")
                 lf.flush()
 
-                try:
-                    event = json.loads(line)
-                except json.JSONDecodeError:
+                evt: AgentEvent | None = backend.parse_output_line(line)
+                if evt is None:
                     continue
 
-                etype = event.get("type", "")
+                if evt.type in ("assistant", "content_block_delta"):
+                    if evt.content and content_size < MAX_OUTPUT_BYTES:
+                        last_content.append(evt.content)
+                        content_size += len(evt.content)
 
-                if etype == "assistant" and "message" in event:
-                    msg = event["message"]
-                    for block in msg.get("content") or []:
-                        if block.get("type") == "text":
-                            text = block["text"]
-                            if content_size < MAX_OUTPUT_BYTES:
-                                last_content.append(text)
-                                content_size += len(text)
-
-                elif etype == "result":
-                    output_summary = event.get("result", "")
-                    if event.get("is_error"):
+                elif evt.type == "result":
+                    output_summary = evt.content or ""
+                    if evt.is_error:
                         await db.add_log(
                             task["id"],
                             f"Agent error: {output_summary[:TRUNCATE_SUMMARY]}",
                             level="error",
                         )
-
-                elif etype == "content_block_delta":
-                    delta = event.get("delta", {})
-                    if delta.get("type") == "text_delta":
-                        text = delta.get("text", "")
-                        if content_size < MAX_OUTPUT_BYTES:
-                            last_content.append(text)
-                            content_size += len(text)
 
     async def read_stderr():
         async for raw_line in proc.stderr:

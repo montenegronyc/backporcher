@@ -1,5 +1,7 @@
 """Worker daemon startup logic: PID lock, stale task recovery, preflight checks."""
 
+from __future__ import annotations
+
 import asyncio
 import logging
 import os
