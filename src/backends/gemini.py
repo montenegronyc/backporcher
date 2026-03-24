@@ -35,7 +35,10 @@ class GeminiBackend:
             "--output-format",
             "stream-json",
         ]
-        if model and model not in ("gemini", "auto"):
+        # Gemini uses its own model names — don't pass Claude model names
+        # (sonnet/opus/haiku). Only pass explicit Gemini model IDs.
+        _claude_models = {"sonnet", "opus", "haiku"}
+        if model and model not in ("gemini", "auto") and model not in _claude_models:
             cmd.extend(["-m", model])
         return cmd
 
