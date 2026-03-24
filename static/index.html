@@ -7,12 +7,18 @@
 <link rel="stylesheet" href="/theme.css">
 <!-- Theme CSS served from backporcher-theme.css -->
 <style>
-/* Page-specific overrides (if any) can go here */
 .agent-badge {
   font-size: 0.72em;
   font-family: var(--font-mono, monospace);
   opacity: 0.75;
   letter-spacing: 0.02em;
+}
+/* Override LIVE indicator to use green instead of muted accent */
+.status-live { color: #4caf50 !important; }
+.status-live::before { background: #4caf50 !important; animation: pulse-live 2s ease-in-out infinite !important; }
+@keyframes pulse-live {
+  0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(76,175,80,0.5); }
+  50% { opacity: 0.7; box-shadow: 0 0 6px 2px rgba(76,175,80,0.4); }
 }
 </style>
 </head>
@@ -800,7 +806,7 @@ function update(data) {
   const workerBtn = document.getElementById('worker-btn');
   _workerRunning = !!data.worker_running;
   if (_workerRunning) {
-    workerSt.textContent = 'WORKER: PID ' + (data.worker_pid||'?');
+    workerSt.textContent = data.worker_pid ? 'WORKER: PID ' + data.worker_pid : 'WORKER: RUNNING';
     workerSt.className = 'text-green';
     workerBtn.textContent = 'STOP FLEET';
     workerBtn.className = 'btn btn-reject';
