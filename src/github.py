@@ -1,5 +1,7 @@
 """GitHub CLI interactions — issue operations, labels, and re-exports."""
 
+from __future__ import annotations
+
 import json
 import logging
 

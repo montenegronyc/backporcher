@@ -3,7 +3,7 @@
 import asyncio
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from aiohttp import web
 
@@ -20,6 +20,7 @@ async def _build_status(db: Database) -> dict:
         "t.completed_at, t.pr_url, t.pr_number, t.priority, t.depends_on_task_id, "
         "t.retry_count, t.error_message, t.branch_name, t.hold, "
         "t.agent_started_at, t.agent_finished_at, t.model_used, t.initial_model, "
+        "t.agent, "
         "t.repo_id, "
         "r.name as repo_name, "
         "substr(t.prompt, 1, 120) as title "
@@ -57,6 +58,9 @@ async def _build_status(db: Database) -> dict:
         else:
             row["elapsed"] = None
             row["elapsed_seconds"] = 0
+        # Ensure agent field always has a value
+        if not row.get("agent"):
+            row["agent"] = "claude"
 
     # Check global pause
     queue_paused = await db.is_queue_paused()
@@ -150,7 +154,7 @@ async def stats_handler(request: web.Request) -> web.Response:
 
     # All tasks (exclude cancelled) — use direct SQL for efficiency
     async with db.db.execute(
-        "SELECT t.status, t.model, t.created_at, t.completed_at, "
+        "SELECT t.status, t.model, t.agent, t.created_at, t.completed_at, "
         "t.agent_started_at, t.agent_finished_at, t.model_used, t.initial_model, "
         "t.retry_count, r.name as repo_name "
         "FROM tasks t JOIN repos r ON t.repo_id = r.id "
@@ -204,14 +208,18 @@ async def stats_handler(request: web.Request) -> web.Response:
         m = t.get("model_used") or t.get("model") or "unknown"
         model_counts[m] = model_counts.get(m, 0) + 1
 
+    # Agent/backend breakdown
+    agent_counts = {}
+    for t in tasks:
+        a = t.get("agent") or "claude"
+        agent_counts[a] = agent_counts.get(a, 0) + 1
+
     # Escalations
     escalations = sum(
         1 for t in tasks if t.get("initial_model") and t.get("model_used") and t["initial_model"] != t["model_used"]
     )
 
     # Last 7 days
-    from datetime import timedelta
-
     seven_ago = now - timedelta(days=7)
     recent = [t for t in tasks if (_parse_iso(t["created_at"]) or now) >= seven_ago]
     recent_completed = [t for t in recent if t["status"] == "completed"]
@@ -246,6 +254,7 @@ async def stats_handler(request: web.Request) -> web.Response:
                 "total_retries": total_retries,
                 "retry_rate": round(retry_rate, 1),
                 "models": model_counts,
+                "agents": agent_counts,
                 "escalations": escalations,
                 "recent_7d": {
                     "completed": len(recent_completed),

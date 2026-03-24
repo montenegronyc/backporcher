@@ -1,5 +1,7 @@
 """Navigation context generation: code graph -> sonnet -> file map for agents."""
 
+from __future__ import annotations
+
 import asyncio
 import json
 import logging

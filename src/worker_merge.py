@@ -1,5 +1,7 @@
 """Merge and post-merge bookkeeping for the CI monitor loop."""
 
+from __future__ import annotations
+
 import logging
 from datetime import datetime, timezone
 

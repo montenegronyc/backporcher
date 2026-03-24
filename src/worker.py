@@ -1,10 +1,15 @@
-"""Background worker daemon: 5 core loops + optional dashboard — issue poller, task executor, coordinator reviewer, CI monitor, artifact cleanup."""
+"""Background worker daemon: 5 core loops + optional dashboard.
+
+Issue poller, task executor, coordinator reviewer, CI monitor, artifact
+cleanup.
+"""
 
 import asyncio
 import logging
 import signal
 
 from . import notifications
+from .backends import discover_backends
 from .config import Config, load_config
 from .db import Database
 from .dispatcher import dispatch_task
@@ -37,12 +42,14 @@ class WorkerDaemon:
         self.semaphore = asyncio.Semaphore(config.max_workers)
         self._running = False
         self._tasks: set[asyncio.Task] = set()
+        self.backends = discover_backends(config)
 
     async def run(self):
         """Launch concurrent loops (4 core + optional dashboard)."""
         self._running = True
         log.info(
-            "Worker daemon started (max_concurrency=%d, issue_poll=%ds, ci_poll=%ds, coordinator_model=%s, approval_mode=%s)",
+            "Worker daemon started (max_concurrency=%d, issue_poll=%ds, "
+            "ci_poll=%ds, coordinator_model=%s, approval_mode=%s)",
             self.config.max_workers,
             self.config.poll_interval_seconds,
             self.config.ci_check_interval_seconds,
@@ -64,10 +71,11 @@ class WorkerDaemon:
         ]
 
         if self.config.dashboard_password:
-            from .dashboard import start_dashboard
+            from .dashboard import set_embedded_mode, start_dashboard
 
+            set_embedded_mode()
             loops.append(start_dashboard(self.db, self.config))
-            log.info("Dashboard enabled on port %d", self.config.dashboard_port)
+            log.info("Dashboard enabled on port %d (embedded mode)", self.config.dashboard_port)
         else:
             log.info("Dashboard disabled (no BACKPORCHER_DASHBOARD_PASSWORD set)")
 
@@ -108,7 +116,7 @@ class WorkerDaemon:
     async def _run_with_semaphore(self, task: dict):
         async with self.semaphore:
             try:
-                await dispatch_task(task, self.config, self.db)
+                await dispatch_task(task, self.config, self.db, backends=self.backends)
             except Exception:
                 log.exception("Unhandled error dispatching task %d", task["id"])
             finally:

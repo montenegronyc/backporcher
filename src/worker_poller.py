@@ -1,5 +1,7 @@
 """Issue poller loop body: poll GitHub for new issues, triage, batch-orchestrate."""
 
+from __future__ import annotations
+
 import logging
 
 from .config import Config
@@ -56,7 +58,7 @@ async def poll_issues(db: Database, config: Config, allowed_users: set[str]) -> 
         # Normal issues: single = triage, 2+ = batch orchestrate
         if len(normal_issues) == 1:
             issue = normal_issues[0]
-            model, triage_reason = await triage_issue(
+            agent, model, triage_reason = await triage_issue(
                 issue.title,
                 issue.body,
                 config,
@@ -69,6 +71,7 @@ async def poll_issues(db: Database, config: Config, allowed_users: set[str]) -> 
                 issue,
                 model,
                 triage_reason,
+                agent=agent,
             )
         elif len(normal_issues) >= 2:
             await batch_create_tasks(
@@ -90,6 +93,7 @@ async def create_task_for_issue(
     reason: str,
     priority: int = 100,
     depends_on_task_id: int | None = None,
+    agent: str = "claude",
 ) -> int:
     """Create a single task from an issue and claim it on GitHub."""
     prompt = issue.title
@@ -104,6 +108,7 @@ async def create_task_for_issue(
         issue.url,
         priority=priority,
         depends_on_task_id=depends_on_task_id,
+        agent=agent,
     )
     await db.add_log(
         task_id,
@@ -153,7 +158,7 @@ async def batch_create_tasks(
         # Fallback: triage each individually
         log.warning("Batch orchestration failed, falling back to individual triage")
         for issue in issues:
-            model, reason = await triage_issue(
+            agent, model, reason = await triage_issue(
                 issue.title,
                 issue.body,
                 config,
@@ -166,6 +171,7 @@ async def batch_create_tasks(
                 issue,
                 model,
                 reason,
+                agent=agent,
             )
         return
 
@@ -203,6 +209,7 @@ async def batch_create_tasks(
             reason=entry["reason"],
             priority=entry["priority"],
             depends_on_task_id=dep_task_id,
+            agent=entry.get("agent", config.default_agent),
         )
         issue_to_task_id[entry["issue_number"]] = task_id
 

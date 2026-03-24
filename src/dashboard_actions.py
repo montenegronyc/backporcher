@@ -137,6 +137,8 @@ async def edit_task_handler(request: web.Request) -> web.Response:
         updates["prompt"] = str(body["prompt"])[:10000]
     if "model" in body and body["model"] in ("sonnet", "opus", "haiku"):
         updates["model"] = body["model"]
+    if "agent" in body and body["agent"]:
+        updates["agent"] = str(body["agent"]).lower()
     if "priority" in body:
         try:
             updates["priority"] = int(body["priority"])
@@ -228,12 +230,15 @@ async def requeue_task_handler(request: web.Request) -> web.Response:
 
     if "model" in body and body["model"] in ("sonnet", "opus", "haiku"):
         updates["model"] = body["model"]
+    if "agent" in body and body["agent"]:
+        updates["agent"] = str(body["agent"]).lower()
     if "prompt" in body and body["prompt"]:
         updates["prompt"] = str(body["prompt"])[:10000]
 
     await db.update_task(task_id, **updates)
     model = updates.get("model", task["model"])
-    await db.add_log(task_id, f"Re-queued via dashboard (model={model})")
+    agent = updates.get("agent", task.get("agent", "claude"))
+    await db.add_log(task_id, f"Re-queued via dashboard (agent={agent}, model={model})")
 
     return web.json_response({"ok": True, "task_id": task_id, "action": "requeue"})
 

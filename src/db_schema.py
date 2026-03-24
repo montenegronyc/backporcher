@@ -2,7 +2,7 @@
 
 import sqlite3
 
-SCHEMA_VERSION = 8
+SCHEMA_VERSION = 9
 
 SCHEMA_V1 = """
 CREATE TABLE IF NOT EXISTS repos (
@@ -67,7 +67,9 @@ CREATE TABLE tasks_v3 (
     branch_name TEXT,
     worktree_path TEXT,
     status TEXT NOT NULL DEFAULT 'queued'
-        CHECK (status IN ('queued','working','pr_created','reviewing','reviewed','ci_passed','retrying','completed','failed','cancelled')),
+        CHECK (status IN ('queued','working','pr_created','reviewing',
+                          'reviewed','ci_passed','retrying','completed',
+                          'failed','cancelled')),
     pr_url TEXT,
     model TEXT DEFAULT 'sonnet',
     agent_pid INTEGER,

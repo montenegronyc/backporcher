@@ -7,7 +7,15 @@ from datetime import datetime, timezone
 
 from aiohttp import web
 
-from .dashboard import _dispatching, _is_worker_alive, _start_worker, _stop_worker, _worker_log_lines, _worker_proc
+from .dashboard import (
+    _dispatching,
+    _embedded_mode,
+    _is_worker_alive,
+    _start_worker,
+    _stop_worker,
+    _worker_log_lines,
+    _worker_proc,
+)
 
 log = logging.getLogger("backporcher.dashboard")
 
@@ -105,6 +113,7 @@ async def create_task_handler(request: web.Request) -> web.Response:
     repo_name = body.get("repo")
     prompt = body.get("prompt", "").strip()
     model = body.get("model", "sonnet")
+    agent = body.get("agent", "claude").lower()
     try:
         priority = int(body.get("priority", 100))
     except (ValueError, TypeError):
@@ -122,15 +131,24 @@ async def create_task_handler(request: web.Request) -> web.Response:
         return web.json_response({"ok": False, "error": f"repo '{repo_name}' not found"}, status=404)
 
     task_id = await db.create_task(repo["id"], prompt, model)
+    updates = {}
     if priority != 100:
-        await db.update_task(task_id, priority=priority)
-    await db.add_log(task_id, f"Created manually via dashboard (model={model})")
+        updates["priority"] = priority
+    if agent != "claude":
+        updates["agent"] = agent
+    if updates:
+        await db.update_task(task_id, **updates)
+    await db.add_log(task_id, f"Created manually via dashboard (agent={agent}, model={model})")
 
     return web.json_response({"ok": True, "task_id": task_id})
 
 
 async def worker_start_handler(request: web.Request) -> web.Response:
     """Start the worker daemon subprocess."""
+    if _embedded_mode:
+        return web.json_response(
+            {"ok": False, "message": "Worker is built-in (embedded mode) — cannot start separately"}
+        )
     config = request.app["config"]
     ok, msg = await _start_worker(config)
     return web.json_response({"ok": ok, "message": msg})
@@ -138,17 +156,24 @@ async def worker_start_handler(request: web.Request) -> web.Response:
 
 async def worker_stop_handler(request: web.Request) -> web.Response:
     """Stop the worker daemon subprocess."""
+    if _embedded_mode:
+        return web.json_response(
+            {"ok": False, "message": "Worker is built-in (embedded mode) — cannot stop separately"}
+        )
     ok, msg = await _stop_worker()
     return web.json_response({"ok": ok, "message": msg})
 
 
 async def worker_status_handler(request: web.Request) -> web.Response:
     """Worker status and recent log lines."""
+    import os
+
     alive = _is_worker_alive()
-    pid = _worker_proc.pid if _worker_proc and alive else None
+    pid = os.getpid() if _embedded_mode else (_worker_proc.pid if _worker_proc and alive else None)
     return web.json_response(
         {
             "running": alive,
+            "embedded": _embedded_mode,
             "pid": pid,
             "log": _worker_log_lines[-50:],
         }

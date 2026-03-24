@@ -1,5 +1,7 @@
 """GitHub PR operations — CI status, diffs, comments, merge, conflict checks."""
 
+from __future__ import annotations
+
 import json
 import logging
 

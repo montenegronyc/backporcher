@@ -1,5 +1,7 @@
 """Review: coordinator PR review and PR creation."""
 
+from __future__ import annotations
+
 import asyncio
 import logging
 import os

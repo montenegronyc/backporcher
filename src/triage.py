@@ -1,5 +1,7 @@
 """Triage: issue classification, batch orchestration, conflict detection."""
 
+from __future__ import annotations
+
 import asyncio
 import json
 import logging
@@ -26,11 +28,12 @@ from .prompts import (
 log = logging.getLogger("backporcher.triage")
 
 
-async def triage_issue(title: str, body: str, config: Config) -> tuple[str, str]:
-    """Run haiku to classify issue complexity. Returns (model, reason)."""
+async def triage_issue(title: str, body: str, config: Config) -> tuple[str, str, str]:
+    """Run haiku to classify issue complexity. Returns (agent, model, reason)."""
     prompt = TRIAGE_PROMPT_TEMPLATE.format(
         title=title,
         body=(body or "(no body)")[:TRUNCATE_TRIAGE_BODY],
+        enabled_agents=", ".join(config.enabled_agents),
     )
 
     cmd = ["claude", "-p", "--output-format", "text", "--model", "haiku", prompt]
@@ -68,39 +71,90 @@ async def triage_issue(title: str, body: str, config: Config) -> tuple[str, str]
     except asyncio.TimeoutError:
         proc.kill()
         await proc.wait()
-        log.warning("Triage timed out, defaulting to %s", config.default_model)
-        return config.default_model, "triage timed out"
+        log.warning("Triage timed out, defaulting to %s/%s", config.default_agent, config.default_model)
+        return config.default_agent, config.default_model, "triage timed out"
 
     output = stdout.decode(errors="replace").strip()
     if proc.returncode != 0:
-        log.warning("Triage failed (exit %d), defaulting to %s", proc.returncode, config.default_model)
-        return config.default_model, f"triage failed (exit {proc.returncode})"
+        log.warning(
+            "Triage failed (exit %d), defaulting to %s/%s",
+            proc.returncode,
+            config.default_agent,
+            config.default_model,
+        )
+        return config.default_agent, config.default_model, f"triage failed (exit {proc.returncode})"
 
-    # Parse "MODEL: opus — reason" or "MODEL: sonnet — reason"
+    # Parse "AGENT: kimi MODEL: opus -- reason" or legacy "MODEL: sonnet -- reason"
     for line in output.strip().splitlines():
         cleaned = line.strip().strip("*_").strip()
         upper = cleaned.upper()
-        if upper.startswith("MODEL: OPUS"):
-            reason = (
-                cleaned.split("—", 1)[-1].strip()
-                if "—" in cleaned
-                else cleaned.split("-", 1)[-1].strip()
-                if "- " in cleaned
-                else "classified as complex"
-            )
-            return "opus", reason
-        elif upper.startswith("MODEL: SONNET"):
-            reason = (
-                cleaned.split("—", 1)[-1].strip()
-                if "—" in cleaned
-                else cleaned.split("-", 1)[-1].strip()
-                if "- " in cleaned
-                else "classified as straightforward"
-            )
-            return "sonnet", reason
 
-    log.warning("Could not parse triage output, defaulting to %s: %s", config.default_model, output[:TRUNCATE_REASON])
-    return config.default_model, "unparseable triage output"
+        # New format: AGENT: <agent> MODEL: <model> -- reason
+        if upper.startswith("AGENT:"):
+            agent, model, reason = _parse_agent_model_line(cleaned, config)
+            return agent, model, reason
+
+        # Legacy format: MODEL: <model> -- reason  (no agent specified)
+        if upper.startswith("MODEL: OPUS"):
+            reason = _extract_reason(cleaned, "classified as complex")
+            return config.default_agent, "opus", reason
+        elif upper.startswith("MODEL: SONNET"):
+            reason = _extract_reason(cleaned, "classified as straightforward")
+            return config.default_agent, "sonnet", reason
+
+    log.warning(
+        "Could not parse triage output, defaulting to %s/%s: %s",
+        config.default_agent,
+        config.default_model,
+        output[:TRUNCATE_REASON],
+    )
+    return config.default_agent, config.default_model, "unparseable triage output"
+
+
+def _extract_reason(line: str, default: str) -> str:
+    """Extract the reason portion after the em-dash or hyphen separator."""
+    if "\u2014" in line:
+        return line.split("\u2014", 1)[-1].strip()
+    if "- " in line:
+        return line.split("-", 1)[-1].strip()
+    return default
+
+
+def _parse_agent_model_line(line: str, config: Config) -> tuple[str, str, str]:
+    """Parse 'AGENT: kimi MODEL: sonnet -- reason' into (agent, model, reason)."""
+    upper = line.upper()
+
+    # Extract agent
+    agent = config.default_agent
+    agent_start = upper.find("AGENT:") + len("AGENT:")
+    model_start = upper.find("MODEL:")
+    if model_start > agent_start:
+        agent_str = line[agent_start:model_start].strip().lower()
+        if agent_str in config.enabled_agents:
+            agent = agent_str
+        else:
+            log.warning("Triage returned unknown agent %r, using default %s", agent_str, config.default_agent)
+
+    # Extract model
+    model = config.default_model
+    if model_start >= 0:
+        after_model = line[model_start + len("MODEL:") :].strip()
+        # Split on em-dash or regular dash to get model vs reason
+        for sep in ("\u2014", " - ", " \u2014 "):
+            if sep in after_model:
+                model_str, reason = after_model.split(sep, 1)
+                model_str = model_str.strip().lower()
+                reason = reason.strip()
+                if model_str in ("opus", "sonnet", "haiku"):
+                    model = model_str
+                return agent, model, reason or "classified by triage"
+        # No separator found -- entire remainder is the model
+        model_str = after_model.strip().lower()
+        if model_str in ("opus", "sonnet", "haiku"):
+            model = model_str
+        return agent, model, "classified by triage"
+
+    return agent, model, "classified by triage"
 
 
 async def orchestrate_batch(
@@ -109,7 +163,7 @@ async def orchestrate_batch(
     config: Config,
 ) -> list[dict] | None:
     """Batch-orchestrate multiple issues via haiku. Returns list of dicts with
-    issue_number, model, priority, depends_on, reason. Returns None on failure."""
+    issue_number, agent, model, priority, depends_on, reason. Returns None on failure."""
     issues_lines = []
     for iss in issues:
         body = (iss.get("body") or "(no body)")[:TRUNCATE_BATCH_ISSUE_BODY]
@@ -119,6 +173,7 @@ async def orchestrate_batch(
         repo_name=repo_name,
         issues_block="\n".join(issues_lines),
         n_issues=len(issues),
+        enabled_agents=", ".join(config.enabled_agents),
     )
 
     cmd = ["claude", "-p", "--output-format", "text", "--model", "haiku", prompt]
@@ -192,6 +247,7 @@ async def orchestrate_batch(
     # Validate entries
     issue_numbers = {iss["number"] for iss in issues}
     valid_models = {"sonnet", "opus"}
+    enabled = set(config.enabled_agents)
     validated = []
 
     for entry in result:
@@ -201,6 +257,9 @@ async def orchestrate_batch(
         model = entry.get("model", config.default_model)
         if model not in valid_models:
             model = config.default_model
+        agent = entry.get("agent", config.default_agent)
+        if agent not in enabled:
+            agent = config.default_agent
         priority = entry.get("priority", 100)
         if not isinstance(priority, int):
             priority = 100
@@ -211,6 +270,7 @@ async def orchestrate_batch(
         validated.append(
             {
                 "issue_number": num,
+                "agent": agent,
                 "model": model,
                 "priority": priority,
                 "depends_on": depends_on,
@@ -225,6 +285,7 @@ async def orchestrate_batch(
             validated.append(
                 {
                     "issue_number": iss["number"],
+                    "agent": config.default_agent,
                     "model": config.default_model,
                     "priority": 100,
                     "depends_on": None,

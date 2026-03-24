@@ -1,4 +1,6 @@
-"""Dispatch helpers: failure handling, credential sync, retry logic."""
+"""Dispatch helpers: failure handling, credential sync, retry logic, agent fallback."""
+
+from __future__ import annotations
 
 import logging
 from datetime import datetime, timezone
@@ -85,6 +87,19 @@ def _pick_retry_model(current_model: str, retry_count: int) -> str:
         log.info("Model escalation: sonnet -> opus (retry %d)", retry_count)
         return "opus"
     return current_model
+
+
+def _pick_fallback_agent(task: dict, config: Config) -> str | None:
+    """Return the next agent in the fallback chain, or None if exhausted."""
+    chain = config.fallback_chain
+    current = task.get("agent", "claude")
+    try:
+        idx = chain.index(current)
+        if idx + 1 < len(chain):
+            return chain[idx + 1]
+    except ValueError:
+        pass
+    return None
 
 
 async def retry_with_ci_context(

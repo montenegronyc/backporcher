@@ -1,5 +1,7 @@
 """GitHub shared helpers — gh CLI runner, dataclasses, URL utilities."""
 
+from __future__ import annotations
+
 import asyncio
 import logging
 import re

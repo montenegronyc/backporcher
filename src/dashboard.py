@@ -1,5 +1,7 @@
 """Real-time web dashboard for Backporcher — aiohttp + SSE, no frontend build step."""
 
+from __future__ import annotations
+
 import asyncio
 import base64
 import logging
@@ -22,8 +24,20 @@ _worker_proc: asyncio.subprocess.Process | None = None
 _worker_log_lines: list[str] = []  # last N lines of worker output
 _WORKER_LOG_MAX = 200
 
+# When True the dashboard is running inside the worker process (container mode).
+# The worker is always alive — start/stop controls are disabled.
+_embedded_mode: bool = False
+
+
+def set_embedded_mode():
+    """Mark that the dashboard is running inside the worker process."""
+    global _embedded_mode
+    _embedded_mode = True
+
 
 def _is_worker_alive() -> bool:
+    if _embedded_mode:
+        return True
     return _worker_proc is not None and _worker_proc.returncode is None
 
 

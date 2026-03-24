@@ -8,6 +8,12 @@
 <!-- Theme CSS served from backporcher-theme.css -->
 <style>
 /* Page-specific overrides (if any) can go here */
+.agent-badge {
+  font-size: 0.72em;
+  font-family: var(--font-mono, monospace);
+  opacity: 0.75;
+  letter-spacing: 0.02em;
+}
 </style>
 </head>
 <body>
@@ -93,6 +99,10 @@
           <div class="metric-stat">
             <div class="metric-value" id="m-time">-</div>
             <div class="metric-label">Avg Time</div>
+          </div>
+          <div class="metric-stat" style="min-width:180px">
+            <div id="m-agents" style="display:flex;gap:6px;flex-wrap:wrap;justify-content:center">-</div>
+            <div class="metric-label">Agents</div>
           </div>
         </div>
       </div>
@@ -411,7 +421,7 @@ function renderFleet(tasks) {
   let html = '<table class="fleet-table"><thead><tr>';
   html += sortHeader('id','ID') + sortHeader('status','Status') + sortHeader('repo','Repo');
   html += sortHeader('issue','Issue') + '<th>PR</th>' + sortHeader('model','Model');
-  html += sortHeader('time','Time') + '<th>Actions</th>';
+  html += '<th>Agent</th>' + sortHeader('time','Time') + '<th>Actions</th>';
   html += '</tr></thead><tbody>';
   for (const t of sorted) {
     const sel = t.id === _selectedId ? ' selected' : '';
@@ -423,7 +433,10 @@ function renderFleet(tasks) {
     html += `<td class="col-repo">${esc(t.repo_name)}</td>`;
     html += `<td class="col-issue">${issueLink(t)}</td>`;
     html += `<td>${prLink(t)}</td>`;
-    html += `<td class="col-model">${esc(t.model||'')}</td>`;
+    const agentLabel = t.agent || 'claude';
+    const modelLabel = agentLabel !== 'claude' ? agentLabel + '/' + (t.model||'') : (t.model||'');
+    html += `<td class="col-model">${esc(modelLabel)}</td>`;
+    html += `<td class="col-agent"><span class="agent-badge">${esc(agentLabel)}</span></td>`;
     html += `<td class="col-time">${time}</td>`;
     html += `<td>${actionBtns(t)}</td>`;
     html += '</tr>';
@@ -466,6 +479,32 @@ function updateMetrics(tasks) {
   }
   document.getElementById('m-time').textContent = mergeTimes.length ? fmtDur(mergeTimes.reduce((a,b)=>a+b,0)/mergeTimes.length) : '—';
 
+  // Agent breakdown — styled pill badges (DOM-safe, no innerHTML)
+  const agentCounts = {};
+  for (const t of nonCancelled) { const a = t.agent || 'claude'; agentCounts[a] = (agentCounts[a]||0) + 1; }
+  const agentColors = {claude:'#c8956c',kimi:'#6ca8c8',gemini:'#7c9f5e',opencode:'#9b7cc8',codex:'#c87c7c'};
+  const agentEl = document.getElementById('m-agents');
+  agentEl.replaceChildren();
+  const entries = Object.entries(agentCounts).sort((a,b) => b[1]-a[1]);
+  if (entries.length) {
+    for (const [name, count] of entries) {
+      const bg = agentColors[name] || '#888';
+      const pill = document.createElement('span');
+      pill.style.cssText = `display:inline-flex;align-items:center;gap:4px;padding:2px 10px;border-radius:12px;background:${bg}22;border:1px solid ${bg}55;font-size:0.78em;font-family:var(--font-mono,monospace)`;
+      const dot = document.createElement('span');
+      dot.style.cssText = `width:7px;height:7px;border-radius:50%;background:${bg};display:inline-block`;
+      const label = document.createElement('span');
+      label.textContent = name;
+      const num = document.createElement('span');
+      num.style.cssText = 'font-weight:600;opacity:0.9';
+      num.textContent = count;
+      pill.append(dot, label, num);
+      agentEl.appendChild(pill);
+    }
+  } else {
+    agentEl.textContent = '\u2014';
+  }
+
   const retries = nonCancelled.reduce((a,t) => a + (t.retry_count||0), 0);
   const retryPct = total > 0 ? Math.round(retries/total*100) : 0;
   document.getElementById('m-retry').textContent = total > 0 ? retryPct + '%' : '—';
@@ -490,7 +529,9 @@ function showTaskDetail(taskId) {
   const editable = t.status === 'queued' || t.status === 'failed' || t.hold;
 
   let html = `<div class="task-detail-title">${esc(t.title)}</div>`;
-  html += `<div class="task-detail-meta">${esc(t.repo_name)} &middot; ${esc(t.model||'')} ${t.elapsed ? '&middot; '+t.elapsed : ''}</div>`;
+  const detailAgent = t.agent || 'claude';
+  const detailModel = detailAgent !== 'claude' ? detailAgent + '/' + (t.model||'') : (t.model||'');
+  html += `<div class="task-detail-meta">${esc(t.repo_name)} &middot; ${esc(detailModel)} ${t.elapsed ? '&middot; '+t.elapsed : ''}</div>`;
 
   // Status explanation
   let statusText = '', isError = false;
@@ -520,6 +561,15 @@ function showTaskDetail(taskId) {
             <option value="sonnet" ${t.model==='sonnet'?'selected':''}>sonnet</option>
             <option value="opus" ${t.model==='opus'?'selected':''}>opus</option>
             <option value="haiku" ${t.model==='haiku'?'selected':''}>haiku</option>
+          </select>
+        </div>
+        <div><label>Agent</label>
+          <select id="ie-agent-${t.id}">
+            <option value="claude" ${(t.agent||'claude')==='claude'?'selected':''}>claude</option>
+            <option value="kimi" ${t.agent==='kimi'?'selected':''}>kimi</option>
+            <option value="gemini" ${t.agent==='gemini'?'selected':''}>gemini</option>
+            <option value="opencode" ${t.agent==='opencode'?'selected':''}>opencode</option>
+            <option value="codex" ${t.agent==='codex'?'selected':''}>codex</option>
           </select>
         </div>
         <div><label>Priority</label>
@@ -586,6 +636,13 @@ function openEditModal(id) {
       <option value="opus" ${task.model==='opus'?'selected':''}>opus</option>
       <option value="haiku" ${task.model==='haiku'?'selected':''}>haiku</option>
     </select></div>`;
+    html += `<div><label>Agent</label><select id="edit-agent">
+      <option value="claude" ${(task.agent||'claude')==='claude'?'selected':''}>claude</option>
+      <option value="kimi" ${task.agent==='kimi'?'selected':''}>kimi</option>
+      <option value="gemini" ${task.agent==='gemini'?'selected':''}>gemini</option>
+      <option value="opencode" ${task.agent==='opencode'?'selected':''}>opencode</option>
+      <option value="codex" ${task.agent==='codex'?'selected':''}>codex</option>
+    </select></div>`;
     html += `<div><label>Priority</label><input type="number" id="edit-priority" value="${task.priority||100}" style="width:80px"></div>`;
     html += `<div style="padding-bottom:2px"><button class="btn btn-approve" onclick="submitEdit(${id})" style="margin-top:18px">SAVE &amp; ${isTerminal ? 'RE-QUEUE' : 'UPDATE'}</button></div>`;
     html += `</div></div>`;
@@ -602,13 +659,14 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal()
 async function submitEdit(id) {
   const prompt = document.getElementById('edit-prompt').value;
   const model = document.getElementById('edit-model').value;
+  const agent = document.getElementById('edit-agent').value;
   const priority = parseInt(document.getElementById('edit-priority').value) || 100;
   const t = _tasks.find(x => x.id == id);
   const terminal = new Set(['completed','failed','cancelled']);
   const isTerminal = t && terminal.has(t.status);
   const url = isTerminal ? '/api/tasks/'+id+'/requeue' : '/api/tasks/'+id+'/edit';
   try {
-    const res = await fetch(url, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({prompt,model,priority})});
+    const res = await fetch(url, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({prompt,model,agent,priority})});
     const d = await res.json();
     if (d.ok) { closeModal(); showTaskDetail(id); } else { alert('Failed: '+(d.error||'')); }
   } catch(e) { alert('Error: '+e); }
@@ -617,6 +675,7 @@ async function submitEdit(id) {
 async function inlineSubmit(id) {
   const prompt = document.getElementById('ie-prompt-' + id)?.value;
   const model = document.getElementById('ie-model-' + id)?.value;
+  const agent = document.getElementById('ie-agent-' + id)?.value;
   const priority = parseInt(document.getElementById('ie-pri-' + id)?.value) || 100;
   const btn = document.getElementById('ie-btn-' + id);
   if (btn) { btn.textContent = '...'; btn.disabled = true; }
@@ -627,7 +686,7 @@ async function inlineSubmit(id) {
   const url = isTerminal ? '/api/tasks/'+id+'/requeue' : '/api/tasks/'+id+'/edit';
 
   try {
-    const res = await fetch(url, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({prompt,model,priority})});
+    const res = await fetch(url, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({prompt,model,agent,priority})});
     const d = await res.json();
     if (d.ok) {
       if (btn) { btn.textContent = 'DONE'; btn.style.borderColor = 'var(--c-success)'; btn.style.color = 'var(--c-success)'; }
@@ -807,6 +866,15 @@ async function openNewTaskModal() {
           <option value="haiku">haiku</option>
         </select>
       </div>
+      <div><label>Agent</label>
+        <select id="new-agent">
+          <option value="claude">claude</option>
+          <option value="kimi">kimi</option>
+          <option value="gemini">gemini</option>
+          <option value="opencode">opencode</option>
+          <option value="codex">codex</option>
+        </select>
+      </div>
       <div><label>Priority</label>
         <input type="number" id="new-priority" value="100" style="width:80px">
       </div>
@@ -825,6 +893,7 @@ async function submitNewTask() {
   const repo = document.getElementById('new-repo').value;
   const prompt = document.getElementById('new-prompt').value.trim();
   const model = document.getElementById('new-model').value;
+  const agent = document.getElementById('new-agent').value;
   const priority = parseInt(document.getElementById('new-priority').value) || 100;
 
   if (!prompt) { alert('Prompt is required'); return; }
@@ -834,7 +903,7 @@ async function submitNewTask() {
       method: 'POST',
       credentials: 'include',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({repo, prompt, model, priority})
+      body: JSON.stringify({repo, prompt, model, agent, priority})
     });
     const d = await res.json();
     if (d.ok) {
