@@ -84,5 +84,21 @@ def discover_backends(config) -> dict[str, AgentBackend]:
         backends["codex"] = CodexBackend(api_key=codex_key)
         log.debug("discover_backends: codex registered")
 
+    # Gemini CLI — needs CLI; API key optional (may use gcloud auth).
+    gemini_key = getattr(config, "gemini_api_key", "") or ""
+    if shutil.which("gemini") is not None:
+        from .gemini import GeminiBackend  # noqa: PLC0415
+
+        backends["gemini"] = GeminiBackend(api_key=gemini_key)
+        log.debug("discover_backends: gemini registered")
+
+    # OpenCode — needs CLI; uses its own config for LLM endpoint.
+    if shutil.which("opencode") is not None:
+        from .opencode import OpenCodeBackend  # noqa: PLC0415
+
+        opencode_model = getattr(config, "opencode_model", "") or ""
+        backends["opencode"] = OpenCodeBackend(model=opencode_model)
+        log.debug("discover_backends: opencode registered")
+
     log.info("discover_backends: %d backend(s): %s", len(backends), list(backends.keys()))
     return backends

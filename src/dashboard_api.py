@@ -113,6 +113,7 @@ async def create_task_handler(request: web.Request) -> web.Response:
     repo_name = body.get("repo")
     prompt = body.get("prompt", "").strip()
     model = body.get("model", "sonnet")
+    agent = body.get("agent", "claude").lower()
     try:
         priority = int(body.get("priority", 100))
     except (ValueError, TypeError):
@@ -130,9 +131,14 @@ async def create_task_handler(request: web.Request) -> web.Response:
         return web.json_response({"ok": False, "error": f"repo '{repo_name}' not found"}, status=404)
 
     task_id = await db.create_task(repo["id"], prompt, model)
+    updates = {}
     if priority != 100:
-        await db.update_task(task_id, priority=priority)
-    await db.add_log(task_id, f"Created manually via dashboard (model={model})")
+        updates["priority"] = priority
+    if agent != "claude":
+        updates["agent"] = agent
+    if updates:
+        await db.update_task(task_id, **updates)
+    await db.add_log(task_id, f"Created manually via dashboard (agent={agent}, model={model})")
 
     return web.json_response({"ok": True, "task_id": task_id})
 

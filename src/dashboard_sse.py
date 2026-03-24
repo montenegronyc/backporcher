@@ -154,7 +154,7 @@ async def stats_handler(request: web.Request) -> web.Response:
 
     # All tasks (exclude cancelled) — use direct SQL for efficiency
     async with db.db.execute(
-        "SELECT t.status, t.model, t.created_at, t.completed_at, "
+        "SELECT t.status, t.model, t.agent, t.created_at, t.completed_at, "
         "t.agent_started_at, t.agent_finished_at, t.model_used, t.initial_model, "
         "t.retry_count, r.name as repo_name "
         "FROM tasks t JOIN repos r ON t.repo_id = r.id "
@@ -208,6 +208,12 @@ async def stats_handler(request: web.Request) -> web.Response:
         m = t.get("model_used") or t.get("model") or "unknown"
         model_counts[m] = model_counts.get(m, 0) + 1
 
+    # Agent/backend breakdown
+    agent_counts = {}
+    for t in tasks:
+        a = t.get("agent") or "claude"
+        agent_counts[a] = agent_counts.get(a, 0) + 1
+
     # Escalations
     escalations = sum(
         1 for t in tasks if t.get("initial_model") and t.get("model_used") and t["initial_model"] != t["model_used"]
@@ -250,6 +256,7 @@ async def stats_handler(request: web.Request) -> web.Response:
                 "total_retries": total_retries,
                 "retry_rate": round(retry_rate, 1),
                 "models": model_counts,
+                "agents": agent_counts,
                 "escalations": escalations,
                 "recent_7d": {
                     "completed": len(recent_completed),

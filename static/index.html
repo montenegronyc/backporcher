@@ -100,6 +100,10 @@
             <div class="metric-value" id="m-time">-</div>
             <div class="metric-label">Avg Time</div>
           </div>
+          <div class="metric-stat">
+            <div class="metric-value" id="m-agents" style="font-size:0.85em">-</div>
+            <div class="metric-label">Agents</div>
+          </div>
         </div>
       </div>
       <div class="panel-corners"></div>
@@ -473,6 +477,12 @@ function updateMetrics(tasks) {
   }
   document.getElementById('m-time').textContent = mergeTimes.length ? fmtDur(mergeTimes.reduce((a,b)=>a+b,0)/mergeTimes.length) : '—';
 
+  // Agent breakdown
+  const agentCounts = {};
+  for (const t of nonCancelled) { const a = t.agent || 'claude'; agentCounts[a] = (agentCounts[a]||0) + 1; }
+  const agentStr = Object.entries(agentCounts).map(([k,v]) => `${k}:${v}`).join(' ');
+  document.getElementById('m-agents').textContent = agentStr || '—';
+
   const retries = nonCancelled.reduce((a,t) => a + (t.retry_count||0), 0);
   const retryPct = total > 0 ? Math.round(retries/total*100) : 0;
   document.getElementById('m-retry').textContent = total > 0 ? retryPct + '%' : '—';
@@ -527,6 +537,15 @@ function showTaskDetail(taskId) {
             <option value="sonnet" ${t.model==='sonnet'?'selected':''}>sonnet</option>
             <option value="opus" ${t.model==='opus'?'selected':''}>opus</option>
             <option value="haiku" ${t.model==='haiku'?'selected':''}>haiku</option>
+          </select>
+        </div>
+        <div><label>Agent</label>
+          <select id="ie-agent-${t.id}">
+            <option value="claude" ${(t.agent||'claude')==='claude'?'selected':''}>claude</option>
+            <option value="kimi" ${t.agent==='kimi'?'selected':''}>kimi</option>
+            <option value="gemini" ${t.agent==='gemini'?'selected':''}>gemini</option>
+            <option value="opencode" ${t.agent==='opencode'?'selected':''}>opencode</option>
+            <option value="codex" ${t.agent==='codex'?'selected':''}>codex</option>
           </select>
         </div>
         <div><label>Priority</label>
@@ -593,6 +612,13 @@ function openEditModal(id) {
       <option value="opus" ${task.model==='opus'?'selected':''}>opus</option>
       <option value="haiku" ${task.model==='haiku'?'selected':''}>haiku</option>
     </select></div>`;
+    html += `<div><label>Agent</label><select id="edit-agent">
+      <option value="claude" ${(task.agent||'claude')==='claude'?'selected':''}>claude</option>
+      <option value="kimi" ${task.agent==='kimi'?'selected':''}>kimi</option>
+      <option value="gemini" ${task.agent==='gemini'?'selected':''}>gemini</option>
+      <option value="opencode" ${task.agent==='opencode'?'selected':''}>opencode</option>
+      <option value="codex" ${task.agent==='codex'?'selected':''}>codex</option>
+    </select></div>`;
     html += `<div><label>Priority</label><input type="number" id="edit-priority" value="${task.priority||100}" style="width:80px"></div>`;
     html += `<div style="padding-bottom:2px"><button class="btn btn-approve" onclick="submitEdit(${id})" style="margin-top:18px">SAVE &amp; ${isTerminal ? 'RE-QUEUE' : 'UPDATE'}</button></div>`;
     html += `</div></div>`;
@@ -609,13 +635,14 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal()
 async function submitEdit(id) {
   const prompt = document.getElementById('edit-prompt').value;
   const model = document.getElementById('edit-model').value;
+  const agent = document.getElementById('edit-agent').value;
   const priority = parseInt(document.getElementById('edit-priority').value) || 100;
   const t = _tasks.find(x => x.id == id);
   const terminal = new Set(['completed','failed','cancelled']);
   const isTerminal = t && terminal.has(t.status);
   const url = isTerminal ? '/api/tasks/'+id+'/requeue' : '/api/tasks/'+id+'/edit';
   try {
-    const res = await fetch(url, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({prompt,model,priority})});
+    const res = await fetch(url, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({prompt,model,agent,priority})});
     const d = await res.json();
     if (d.ok) { closeModal(); showTaskDetail(id); } else { alert('Failed: '+(d.error||'')); }
   } catch(e) { alert('Error: '+e); }
@@ -624,6 +651,7 @@ async function submitEdit(id) {
 async function inlineSubmit(id) {
   const prompt = document.getElementById('ie-prompt-' + id)?.value;
   const model = document.getElementById('ie-model-' + id)?.value;
+  const agent = document.getElementById('ie-agent-' + id)?.value;
   const priority = parseInt(document.getElementById('ie-pri-' + id)?.value) || 100;
   const btn = document.getElementById('ie-btn-' + id);
   if (btn) { btn.textContent = '...'; btn.disabled = true; }
@@ -634,7 +662,7 @@ async function inlineSubmit(id) {
   const url = isTerminal ? '/api/tasks/'+id+'/requeue' : '/api/tasks/'+id+'/edit';
 
   try {
-    const res = await fetch(url, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({prompt,model,priority})});
+    const res = await fetch(url, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({prompt,model,agent,priority})});
     const d = await res.json();
     if (d.ok) {
       if (btn) { btn.textContent = 'DONE'; btn.style.borderColor = 'var(--c-success)'; btn.style.color = 'var(--c-success)'; }
@@ -814,6 +842,15 @@ async function openNewTaskModal() {
           <option value="haiku">haiku</option>
         </select>
       </div>
+      <div><label>Agent</label>
+        <select id="new-agent">
+          <option value="claude">claude</option>
+          <option value="kimi">kimi</option>
+          <option value="gemini">gemini</option>
+          <option value="opencode">opencode</option>
+          <option value="codex">codex</option>
+        </select>
+      </div>
       <div><label>Priority</label>
         <input type="number" id="new-priority" value="100" style="width:80px">
       </div>
@@ -832,6 +869,7 @@ async function submitNewTask() {
   const repo = document.getElementById('new-repo').value;
   const prompt = document.getElementById('new-prompt').value.trim();
   const model = document.getElementById('new-model').value;
+  const agent = document.getElementById('new-agent').value;
   const priority = parseInt(document.getElementById('new-priority').value) || 100;
 
   if (!prompt) { alert('Prompt is required'); return; }
@@ -841,7 +879,7 @@ async function submitNewTask() {
       method: 'POST',
       credentials: 'include',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({repo, prompt, model, priority})
+      body: JSON.stringify({repo, prompt, model, agent, priority})
     });
     const d = await res.json();
     if (d.ok) {

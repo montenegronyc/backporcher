@@ -61,9 +61,11 @@ class Config:
     # Multi-agent backends
     kimi_api_key: str = ""
     codex_api_key: str = ""
+    gemini_api_key: str = ""
+    opencode_model: str = ""  # e.g. "local/Qwen3.5-9B-Q4_K_M.gguf"
     enabled_agents: tuple[str, ...] = ("claude",)
     default_agent: str = "claude"
-    fallback_chain: tuple[str, ...] = ("claude", "kimi", "codex")
+    fallback_chain: tuple[str, ...] = ("claude", "kimi", "codex", "gemini", "opencode")
 
 
 def load_config() -> Config:
@@ -103,7 +105,9 @@ def load_config() -> Config:
         ),
         kimi_api_key=os.environ.get("KIMI_API_KEY", ""),
         codex_api_key=os.environ.get("CODEX_API_KEY", ""),
+        gemini_api_key=os.environ.get("GEMINI_API_KEY", ""),
+        opencode_model=os.environ.get("BACKPORCHER_OPENCODE_MODEL", ""),
         enabled_agents=tuple(os.environ.get("BACKPORCHER_ENABLED_AGENTS", "claude").split(",")),
         default_agent=os.environ.get("BACKPORCHER_DEFAULT_AGENT", "claude"),
-        fallback_chain=tuple(os.environ.get("BACKPORCHER_FALLBACK_CHAIN", "claude,kimi,codex").split(",")),
+        fallback_chain=tuple(os.environ.get("BACKPORCHER_FALLBACK_CHAIN", "claude,kimi,codex,gemini,opencode").split(",")),
     )
