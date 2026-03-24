@@ -56,6 +56,13 @@ class Config:
     webhook_url: str | None = None
     webhook_events: tuple[str, ...] = ("hold", "failed")
 
+    # Multi-agent backends
+    kimi_api_key: str = ""
+    codex_api_key: str = ""
+    enabled_agents: tuple[str, ...] = ("claude",)
+    default_agent: str = "claude"
+    fallback_chain: tuple[str, ...] = ("claude", "kimi", "codex")
+
 
 def load_config() -> Config:
     """Load config from environment variables."""
@@ -92,4 +99,9 @@ def load_config() -> Config:
         webhook_events=tuple(
             e.strip() for e in os.environ.get("BACKPORCHER_WEBHOOK_EVENTS", "hold,failed").split(",") if e.strip()
         ),
+        kimi_api_key=os.environ.get("KIMI_API_KEY", ""),
+        codex_api_key=os.environ.get("CODEX_API_KEY", ""),
+        enabled_agents=tuple(os.environ.get("BACKPORCHER_ENABLED_AGENTS", "claude").split(",")),
+        default_agent=os.environ.get("BACKPORCHER_DEFAULT_AGENT", "claude"),
+        fallback_chain=tuple(os.environ.get("BACKPORCHER_FALLBACK_CHAIN", "claude,kimi,codex").split(",")),
     )

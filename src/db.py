@@ -121,11 +121,12 @@ class Database:
         repo_id: int,
         prompt: str,
         model: str = "sonnet",
+        agent: str = "claude",
     ) -> int:
         async with self._write_lock:
             async with self.db.execute(
-                "INSERT INTO tasks (repo_id, prompt, model) VALUES (?, ?, ?)",
-                (repo_id, prompt, model),
+                "INSERT INTO tasks (repo_id, prompt, model, agent) VALUES (?, ?, ?, ?)",
+                (repo_id, prompt, model, agent),
             ) as cur:
                 await self.db.commit()
                 return cur.lastrowid
@@ -139,13 +140,14 @@ class Database:
         issue_url: str,
         priority: int = 100,
         depends_on_task_id: int | None = None,
+        agent: str = "claude",
     ) -> int:
         """Create a task linked to a GitHub issue."""
         async with self._write_lock:
             async with self.db.execute(
-                "INSERT INTO tasks (repo_id, prompt, model, github_issue_number, github_issue_url, priority, depends_on_task_id) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?)",
-                (repo_id, prompt, model, issue_number, issue_url, priority, depends_on_task_id),
+                "INSERT INTO tasks (repo_id, prompt, model, github_issue_number, github_issue_url, priority, depends_on_task_id, agent) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (repo_id, prompt, model, issue_number, issue_url, priority, depends_on_task_id, agent),
             ) as cur:
                 await self.db.commit()
                 return cur.lastrowid
@@ -297,6 +299,8 @@ class Database:
             "agent_finished_at",
             "model_used",
             "initial_model",
+            "agent",
+            "agent_fallback_count",
         }
         fields = {k: v for k, v in fields.items() if k in allowed}
         if not fields:

@@ -44,6 +44,8 @@ CREATE TABLE IF NOT EXISTS tasks (
     agent_finished_at TEXT,
     model_used TEXT,
     initial_model TEXT,
+    agent TEXT NOT NULL DEFAULT 'claude',
+    agent_fallback_count INTEGER NOT NULL DEFAULT 0,
     started_at TEXT,
     completed_at TEXT,
     created_at TEXT DEFAULT (datetime('now'))
@@ -229,6 +231,14 @@ CREATE INDEX IF NOT EXISTS idx_repo_learnings_repo ON repo_learnings(repo_id);
         conn.execute("CREATE INDEX IF NOT EXISTS idx_repo_learnings_repo ON repo_learnings(repo_id)")
         conn.execute("CREATE TABLE IF NOT EXISTS schema_version (version INTEGER PRIMARY KEY)")
         conn.execute("INSERT OR REPLACE INTO schema_version (version) VALUES (?)", (SCHEMA_VERSION,))
+        conn.commit()
+
+    if version < 9:
+        cur = conn.cursor()
+        cur.execute("ALTER TABLE tasks ADD COLUMN agent TEXT NOT NULL DEFAULT 'claude'")
+        cur.execute("ALTER TABLE tasks ADD COLUMN agent_fallback_count INTEGER NOT NULL DEFAULT 0")
+        cur.execute("UPDATE schema_version SET version = 9")
+        version = 9
         conn.commit()
 
 
