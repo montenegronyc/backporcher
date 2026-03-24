@@ -381,7 +381,9 @@ def build_review_context(
     if len(diff_text) > diff_budget:
         diff_section = (
             diff_text[:diff_budget]
-            + f"\n...(diff truncated at {diff_budget} chars; blast radius analysis below provides dependency context)..."
+            + "\n...(diff truncated at "
+            + f"{diff_budget} chars; blast radius analysis below "
+            + "provides dependency context)..."
         )
     else:
         diff_section = diff_text

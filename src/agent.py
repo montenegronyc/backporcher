@@ -149,7 +149,7 @@ async def run_agent(
                         last_content.append(evt.content)
                         content_size += len(evt.content)
 
-                elif evt.type == "result":
+                elif evt.type in ("result", "error"):
                     output_summary = evt.content or ""
                     if evt.is_error:
                         await db.add_log(

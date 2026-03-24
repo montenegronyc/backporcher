@@ -15,9 +15,12 @@ Implement directly — do NOT give an approach summary or wait for approval.
 """
 
 NAVIGATION_PROMPT = """\
-You are a code navigation assistant. Given a task description and a dependency graph excerpt from the codebase, select the 5-15 most relevant files the developer should examine first to complete the task.
+You are a code navigation assistant. Given a task description and a
+dependency graph excerpt from the codebase, select the 5-15 most relevant
+files the developer should examine first to complete the task.
 
-For each file, list the key symbols (functions/classes) and a one-line rationale explaining why it's relevant.
+For each file, list the key symbols (functions/classes) and a one-line
+rationale explaining why it's relevant.
 
 Output ONLY a JSON array, no markdown fences:
 [{{"file": "relative/path.py", "symbols": ["func_name", "ClassName"], "why": "one-line rationale"}}]
@@ -37,16 +40,25 @@ Output ONLY a JSON array, no markdown fences:
 """
 
 TRIAGE_PROMPT_TEMPLATE = """\
-You are a task complexity classifier for a code agent system. Given a GitHub issue, decide which AI agent and model should work on it.
+You are a task complexity classifier for a code agent system. Given a
+GitHub issue, decide which AI agent and model should work on it.
 
 ## Models Available
-- **sonnet**: Fast, cheap. Good for: bug fixes, single-file changes, config tweaks, adding a flag/parameter, documentation, straightforward implementations with clear instructions.
-- **opus**: Slower, expensive, but much more capable. Required for: multi-file refactors, architectural changes, new subsystems, state management rewrites, complex feature implementations requiring design decisions, anything involving "extract", "redesign", "rewrite", or decomposition of large files.
+- **sonnet**: Fast, cheap. Good for: bug fixes, single-file changes,
+  config tweaks, adding a flag/parameter, documentation, straightforward
+  implementations with clear instructions.
+- **opus**: Slower, expensive, but much more capable. Required for:
+  multi-file refactors, architectural changes, new subsystems, state
+  management rewrites, complex feature implementations requiring design
+  decisions, anything involving "extract", "redesign", "rewrite", or
+  decomposition of large files.
 
 ## Agents Available
 Available agents: {enabled_agents}
-- **claude**: Most capable. Complex multi-file changes, architectural work, cross-file reasoning. Most expensive.
-- **kimi**: Good general capability, cost-effective. Single/multi-file changes, bug fixes.
+- **claude**: Most capable. Complex multi-file changes, architectural
+  work, cross-file reasoning. Most expensive.
+- **kimi**: Good general capability, cost-effective. Single/multi-file
+  changes, bug fixes.
 - **codex**: OpenAI-backed. Straightforward implementations, boilerplate.
 
 ## Issue

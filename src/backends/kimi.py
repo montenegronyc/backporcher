@@ -91,6 +91,10 @@ class KimiBackend:
         log.debug("KimiBackend.parse_output_line: unrecognised role %r", role)
         return None
 
+    def display_model(self, task_model: str) -> str:
+        """Prefix with 'kimi/' for dashboard display."""
+        return f"kimi/{task_model}"
+
     def required_env_vars(self) -> dict[str, str]:
         """Return the ``KIMI_API_KEY`` required by the Kimi CLI."""
         return {"KIMI_API_KEY": self._api_key}

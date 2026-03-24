@@ -79,15 +79,10 @@ async def dispatch_task(
         task_agent = task.get("agent", config.default_agent)
         backend = backends.get(task_agent) or backends.get(config.default_agent)
 
-        # Record agent start timing and model info
-        # For non-Claude agents, prefix with agent name so the dashboard
-        # shows the actual backend (e.g. "gemini/auto", "opencode/qwen3.5-9b")
-        effective_model = task["model"]
-        if backend and backend.name != "claude":
-            if hasattr(backend, "_model") and backend._model:
-                effective_model = f"{backend.name}/{backend._model}"
-            else:
-                effective_model = f"{backend.name}/{task['model']}"
+        # Record agent start timing and model info.
+        # Each backend's display_model() returns a human-readable string
+        # (e.g. "gemini/auto", "opencode/qwen3.5-9b", or just "sonnet" for Claude).
+        effective_model = backend.display_model(task["model"]) if backend else task["model"]
         agent_start_now = datetime.now(timezone.utc).isoformat()
         await db.update_task(
             task_id,

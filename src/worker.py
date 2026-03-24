@@ -1,4 +1,8 @@
-"""Background worker daemon: 5 core loops + optional dashboard — issue poller, task executor, coordinator reviewer, CI monitor, artifact cleanup."""
+"""Background worker daemon: 5 core loops + optional dashboard.
+
+Issue poller, task executor, coordinator reviewer, CI monitor, artifact
+cleanup.
+"""
 
 import asyncio
 import logging
@@ -44,7 +48,8 @@ class WorkerDaemon:
         """Launch concurrent loops (4 core + optional dashboard)."""
         self._running = True
         log.info(
-            "Worker daemon started (max_concurrency=%d, issue_poll=%ds, ci_poll=%ds, coordinator_model=%s, approval_mode=%s)",
+            "Worker daemon started (max_concurrency=%d, issue_poll=%ds, "
+            "ci_poll=%ds, coordinator_model=%s, approval_mode=%s)",
             self.config.max_workers,
             self.config.poll_interval_seconds,
             self.config.ci_check_interval_seconds,

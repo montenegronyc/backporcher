@@ -88,6 +88,10 @@ class CodexBackend:
         log.debug("CodexBackend.parse_output_line: unrecognised event type %r", etype)
         return None
 
+    def display_model(self, task_model: str) -> str:
+        """Prefix with 'codex/' for dashboard display."""
+        return f"codex/{task_model}"
+
     def required_env_vars(self) -> dict[str, str]:
         """Return the CODEX_API_KEY required by this backend."""
         return {"CODEX_API_KEY": self._api_key}

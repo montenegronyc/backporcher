@@ -3,7 +3,7 @@
 import asyncio
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from aiohttp import web
 
@@ -220,8 +220,6 @@ async def stats_handler(request: web.Request) -> web.Response:
     )
 
     # Last 7 days
-    from datetime import timedelta
-
     seven_ago = now - timedelta(days=7)
     recent = [t for t in tasks if (_parse_iso(t["created_at"]) or now) >= seven_ago]
     recent_completed = [t for t in recent if t["status"] == "completed"]

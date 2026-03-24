@@ -79,7 +79,6 @@ class OpenCodeBackend:
             return None
 
         if etype == "result":
-            subtype = event.get("subtype", "")
             is_error = bool(event.get("is_error"))
             content = event.get("result", "") or ""
             return AgentEvent(type="result", content=content, is_error=is_error, raw=event)
@@ -95,6 +94,11 @@ class OpenCodeBackend:
 
         log.debug("OpenCodeBackend.parse_output_line: unrecognised type %r", etype)
         return None
+
+    def display_model(self, task_model: str) -> str:
+        """Prefix with 'opencode/' and prefer the configured model if set."""
+        label = self._model or task_model
+        return f"opencode/{label}"
 
     def required_env_vars(self) -> dict[str, str]:
         """OpenCode uses its own config file for credentials — no env vars needed."""

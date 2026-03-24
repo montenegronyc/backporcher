@@ -107,7 +107,13 @@ def load_config() -> Config:
         codex_api_key=os.environ.get("CODEX_API_KEY", ""),
         gemini_api_key=os.environ.get("GEMINI_API_KEY", ""),
         opencode_model=os.environ.get("BACKPORCHER_OPENCODE_MODEL", ""),
-        enabled_agents=tuple(os.environ.get("BACKPORCHER_ENABLED_AGENTS", "claude").split(",")),
-        default_agent=os.environ.get("BACKPORCHER_DEFAULT_AGENT", "claude"),
-        fallback_chain=tuple(os.environ.get("BACKPORCHER_FALLBACK_CHAIN", "claude,kimi,codex,gemini,opencode").split(",")),
+        enabled_agents=tuple(
+            a.strip() for a in os.environ.get("BACKPORCHER_ENABLED_AGENTS", "claude").split(",") if a.strip()
+        ),
+        default_agent=os.environ.get("BACKPORCHER_DEFAULT_AGENT", "claude").strip(),
+        fallback_chain=tuple(
+            a.strip()
+            for a in os.environ.get("BACKPORCHER_FALLBACK_CHAIN", "claude,kimi,codex,gemini,opencode").split(",")
+            if a.strip()
+        ),
     )

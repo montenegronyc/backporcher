@@ -11,6 +11,9 @@ from . import AgentEvent
 
 log = logging.getLogger("backporcher.backends")
 
+# Claude model names that should never be forwarded to the Gemini CLI.
+_CLAUDE_MODELS: frozenset[str] = frozenset({"sonnet", "opus", "haiku"})
+
 
 class GeminiBackend:
     """Backend that drives ``gemini -p`` (Gemini CLI) as the agent."""
@@ -35,10 +38,9 @@ class GeminiBackend:
             "--output-format",
             "stream-json",
         ]
-        # Gemini uses its own model names — don't pass Claude model names
-        # (sonnet/opus/haiku). Only pass explicit Gemini model IDs.
-        _claude_models = {"sonnet", "opus", "haiku"}
-        if model and model not in ("gemini", "auto") and model not in _claude_models:
+        # Only pass explicit Gemini model IDs — skip Claude model names
+        # and Gemini's own default placeholders.
+        if model and model not in ("gemini", "auto") and model not in _CLAUDE_MODELS:
             cmd.extend(["-m", model])
         return cmd
 
@@ -90,6 +92,10 @@ class GeminiBackend:
 
         log.debug("GeminiBackend.parse_output_line: unrecognised type %r", etype)
         return None
+
+    def display_model(self, task_model: str) -> str:
+        """Prefix with 'gemini/' for dashboard display."""
+        return f"gemini/{task_model}"
 
     def required_env_vars(self) -> dict[str, str]:
         """Return env vars required by the Gemini CLI."""

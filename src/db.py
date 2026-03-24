@@ -147,8 +147,9 @@ class Database:
         """Create a task linked to a GitHub issue."""
         async with self._write_lock:
             async with self.db.execute(
-                "INSERT INTO tasks (repo_id, prompt, model, github_issue_number, github_issue_url, priority, depends_on_task_id, agent) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                "INSERT INTO tasks (repo_id, prompt, model, "
+                "github_issue_number, github_issue_url, priority, "
+                "depends_on_task_id, agent) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                 (repo_id, prompt, model, issue_number, issue_url, priority, depends_on_task_id, agent),
             ) as cur:
                 await self.db.commit()

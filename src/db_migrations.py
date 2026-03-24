@@ -25,7 +25,9 @@ CREATE TABLE IF NOT EXISTS tasks (
     branch_name TEXT,
     worktree_path TEXT,
     status TEXT NOT NULL DEFAULT 'queued'
-        CHECK (status IN ('queued','working','pr_created','reviewing','reviewed','ci_passed','retrying','completed','failed','cancelled')),
+        CHECK (status IN ('queued','working','pr_created','reviewing',
+                          'reviewed','ci_passed','retrying','completed',
+                          'failed','cancelled')),
     pr_url TEXT,
     model TEXT DEFAULT 'sonnet',
     agent_pid INTEGER,

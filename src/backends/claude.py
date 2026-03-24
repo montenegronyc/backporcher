@@ -102,6 +102,10 @@ class ClaudeBackend:
         log.debug("ClaudeBackend.parse_output_line: unrecognised event type %r", etype)
         return None
 
+    def display_model(self, task_model: str) -> str:
+        """Claude returns the model as-is (no prefix needed)."""
+        return task_model
+
     def required_env_vars(self) -> dict[str, str]:
         """
         Claude Code uses mounted credentials, not env vars.

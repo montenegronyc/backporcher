@@ -44,6 +44,16 @@ class AgentBackend(Protocol):
         """
         ...
 
+    def display_model(self, task_model: str) -> str:
+        """
+        Return a human-readable model string for dashboard display.
+
+        For non-Claude backends, this typically prefixes the backend name
+        (e.g. "gemini/auto", "opencode/qwen3.5-9b").  Claude returns
+        the model as-is.
+        """
+        ...
+
     def required_env_vars(self) -> dict[str, str]:
         """
         Return any env vars this backend requires that aren't already in the
