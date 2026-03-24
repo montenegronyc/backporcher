@@ -433,8 +433,10 @@ function renderFleet(tasks) {
     html += `<td class="col-repo">${esc(t.repo_name)}</td>`;
     html += `<td class="col-issue">${issueLink(t)}</td>`;
     html += `<td>${prLink(t)}</td>`;
-    html += `<td class="col-model">${esc(t.model||'')}</td>`;
-    html += `<td class="col-agent"><span class="agent-badge">${esc(t.agent||'claude')}</span></td>`;
+    const agentLabel = t.agent || 'claude';
+    const modelLabel = agentLabel !== 'claude' ? agentLabel + '/' + (t.model||'') : (t.model||'');
+    html += `<td class="col-model">${esc(modelLabel)}</td>`;
+    html += `<td class="col-agent"><span class="agent-badge">${esc(agentLabel)}</span></td>`;
     html += `<td class="col-time">${time}</td>`;
     html += `<td>${actionBtns(t)}</td>`;
     html += '</tr>';
@@ -507,7 +509,9 @@ function showTaskDetail(taskId) {
   const editable = t.status === 'queued' || t.status === 'failed' || t.hold;
 
   let html = `<div class="task-detail-title">${esc(t.title)}</div>`;
-  html += `<div class="task-detail-meta">${esc(t.repo_name)} &middot; ${esc(t.model||'')} ${t.elapsed ? '&middot; '+t.elapsed : ''}</div>`;
+  const detailAgent = t.agent || 'claude';
+  const detailModel = detailAgent !== 'claude' ? detailAgent + '/' + (t.model||'') : (t.model||'');
+  html += `<div class="task-detail-meta">${esc(t.repo_name)} &middot; ${esc(detailModel)} ${t.elapsed ? '&middot; '+t.elapsed : ''}</div>`;
 
   // Status explanation
   let statusText = '', isError = false;
