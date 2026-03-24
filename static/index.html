@@ -8,6 +8,12 @@
 <!-- Theme CSS served from backporcher-theme.css -->
 <style>
 /* Page-specific overrides (if any) can go here */
+.agent-badge {
+  font-size: 0.72em;
+  font-family: var(--font-mono, monospace);
+  opacity: 0.75;
+  letter-spacing: 0.02em;
+}
 </style>
 </head>
 <body>
@@ -411,7 +417,7 @@ function renderFleet(tasks) {
   let html = '<table class="fleet-table"><thead><tr>';
   html += sortHeader('id','ID') + sortHeader('status','Status') + sortHeader('repo','Repo');
   html += sortHeader('issue','Issue') + '<th>PR</th>' + sortHeader('model','Model');
-  html += sortHeader('time','Time') + '<th>Actions</th>';
+  html += '<th>Agent</th>' + sortHeader('time','Time') + '<th>Actions</th>';
   html += '</tr></thead><tbody>';
   for (const t of sorted) {
     const sel = t.id === _selectedId ? ' selected' : '';
@@ -424,6 +430,7 @@ function renderFleet(tasks) {
     html += `<td class="col-issue">${issueLink(t)}</td>`;
     html += `<td>${prLink(t)}</td>`;
     html += `<td class="col-model">${esc(t.model||'')}</td>`;
+    html += `<td class="col-agent"><span class="agent-badge">${esc(t.agent||'claude')}</span></td>`;
     html += `<td class="col-time">${time}</td>`;
     html += `<td>${actionBtns(t)}</td>`;
     html += '</tr>';

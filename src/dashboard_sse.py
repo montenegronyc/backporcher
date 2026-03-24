@@ -20,6 +20,7 @@ async def _build_status(db: Database) -> dict:
         "t.completed_at, t.pr_url, t.pr_number, t.priority, t.depends_on_task_id, "
         "t.retry_count, t.error_message, t.branch_name, t.hold, "
         "t.agent_started_at, t.agent_finished_at, t.model_used, t.initial_model, "
+        "t.agent, "
         "t.repo_id, "
         "r.name as repo_name, "
         "substr(t.prompt, 1, 120) as title "
@@ -57,6 +58,9 @@ async def _build_status(db: Database) -> dict:
         else:
             row["elapsed"] = None
             row["elapsed_seconds"] = 0
+        # Ensure agent field always has a value
+        if not row.get("agent"):
+            row["agent"] = "claude"
 
     # Check global pause
     queue_paused = await db.is_queue_paused()
