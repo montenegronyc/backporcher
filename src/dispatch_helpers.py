@@ -92,21 +92,19 @@ def _pick_retry_model(current_model: str, retry_count: int) -> str:
 def pick_retry_agent_and_model(task: dict, retry_count: int, config: "Config", backends: dict) -> tuple[str, str]:
     """Pick agent + model for a retry attempt.
 
-    Strategy:
-      retry 1: escalate model (sonnet→opus), keep same agent
-      retry 2: fall back to next agent in chain
-      retry 3: fall back again (or stay on last agent with opus)
+    Strategy (sonnet fails on claude):
+      retry 1: try kimi/sonnet
+      retry 2: try gemini/sonnet
+      retry 3: try claude/opus (escalate model as last resort)
+
+    Never falls back to opencode (local model, lower capability).
     """
     current_agent = task.get("agent", config.default_agent)
     current_model = task.get("model", config.default_model)
 
-    if retry_count <= 1:
-        # First retry: just escalate model, keep agent
-        return current_agent, _pick_retry_model(current_model, retry_count)
-
-    # Later retries: try next agent in fallback chain
+    # Try next agent in fallback chain (skips opencode)
     next_agent = _pick_fallback_agent(task, config)
-    if next_agent and next_agent in backends:
+    if next_agent and next_agent in backends and next_agent != "opencode":
         log.info(
             "Agent fallback: %s -> %s (retry %d)",
             current_agent,
@@ -114,8 +112,18 @@ def pick_retry_agent_and_model(task: dict, retry_count: int, config: "Config", b
             retry_count,
         )
         return next_agent, current_model
-    # No more agents — stay on current with escalated model
-    return current_agent, _pick_retry_model(current_model, retry_count)
+
+    # No more agents to try — escalate model on original agent
+    escalated = _pick_retry_model(current_model, retry_count)
+    log.info(
+        "Model escalation: %s/%s -> %s/%s (retry %d)",
+        current_agent,
+        current_model,
+        config.default_agent,
+        escalated,
+        retry_count,
+    )
+    return config.default_agent, escalated
 
 
 def _pick_fallback_agent(task: dict, config: Config) -> str | None:
