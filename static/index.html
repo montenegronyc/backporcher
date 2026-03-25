@@ -221,19 +221,18 @@ function actionBtns(t) {
 /* ═══ Agent Visualizer ═══ */
 function renderAgentViz(tasks) {
   const el = document.getElementById('agent-viz');
-  // Only count tasks as truly working if they don't have a hold
   const working = tasks.filter(t => t.status === 'working' && !t.hold);
   const roles = [
-    { name: 'Coordinator', active: false },
+    { name: 'Coordinator', active: tasks.some(t => t.status === 'reviewing') },
     { name: 'Daemon', active: _workerRunning },
-    { name: 'Orchestrator', active: false },
-    { name: 'Agent 1', active: working.length >= 1 },
-    { name: 'Agent 2', active: working.length >= 2 },
+    { name: 'Orchestrator', active: !_paused && tasks.some(t => t.status === 'queued' && !t.hold) },
   ];
-  // Coordinator active if any reviewing
-  roles[0].active = tasks.some(t => t.status === 'reviewing');
-  // Orchestrator active if any queued without hold, and not paused
-  roles[2].active = !_paused && tasks.some(t => t.status === 'queued' && !t.hold);
+  // Add agent slots matching max concurrency (6)
+  for (let i = 0; i < 6; i++) {
+    const w = working[i];
+    const label = w ? (w.agent || 'claude') : 'Agent ' + (i + 1);
+    roles.push({ name: label, active: !!w });
+  }
 
   let html = '';
   for (const role of roles) {
