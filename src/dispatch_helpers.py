@@ -89,6 +89,35 @@ def _pick_retry_model(current_model: str, retry_count: int) -> str:
     return current_model
 
 
+def pick_retry_agent_and_model(task: dict, retry_count: int, config: "Config", backends: dict) -> tuple[str, str]:
+    """Pick agent + model for a retry attempt.
+
+    Strategy:
+      retry 1: escalate model (sonnet→opus), keep same agent
+      retry 2: fall back to next agent in chain
+      retry 3: fall back again (or stay on last agent with opus)
+    """
+    current_agent = task.get("agent", config.default_agent)
+    current_model = task.get("model", config.default_model)
+
+    if retry_count <= 1:
+        # First retry: just escalate model, keep agent
+        return current_agent, _pick_retry_model(current_model, retry_count)
+
+    # Later retries: try next agent in fallback chain
+    next_agent = _pick_fallback_agent(task, config)
+    if next_agent and next_agent in backends:
+        log.info(
+            "Agent fallback: %s -> %s (retry %d)",
+            current_agent,
+            next_agent,
+            retry_count,
+        )
+        return next_agent, current_model
+    # No more agents — stay on current with escalated model
+    return current_agent, _pick_retry_model(current_model, retry_count)
+
+
 def _pick_fallback_agent(task: dict, config: Config) -> str | None:
     """Return the next agent in the fallback chain, or None if exhausted."""
     chain = config.fallback_chain

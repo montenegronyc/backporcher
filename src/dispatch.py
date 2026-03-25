@@ -18,6 +18,7 @@ from .dispatch_helpers import (
     _mark_issue_failed,
     _pick_fallback_agent,
     _pick_retry_model,
+    pick_retry_agent_and_model,
     sync_agent_credentials,
 )
 from .git_ops import (
@@ -117,7 +118,7 @@ async def dispatch_task(
 
             if retry_count < max_retries:
                 new_count = retry_count + 1
-                new_model = _pick_retry_model(task["model"], new_count)
+                new_agent, new_model = pick_retry_agent_and_model(task, new_count, config, backends)
                 await db.update_task(
                     task_id,
                     status="queued",
@@ -127,19 +128,21 @@ async def dispatch_task(
                     worktree_path=None,
                     retry_count=new_count,
                     model=new_model,
+                    agent=new_agent,
                 )
                 reason = f"exit {exit_code}"
                 await db.add_log(
                     task_id,
-                    f"Agent failed ({reason}), retry {new_count}/{max_retries} (model={new_model})",
+                    f"Agent failed ({reason}), retry {new_count}/{max_retries} (agent={new_agent}, model={new_model})",
                     level="warn",
                 )
                 log.info(
-                    "Task %d: agent failed (%s), retry %d/%d (model=%s)",
+                    "Task %d: agent failed (%s), retry %d/%d (agent=%s, model=%s)",
                     task_id,
                     reason,
                     new_count,
                     max_retries,
+                    new_agent,
                     new_model,
                 )
                 await db.record_metric(
