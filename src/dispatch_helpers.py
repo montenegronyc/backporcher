@@ -162,6 +162,21 @@ def _pick_fallback_agent(task: dict, config: Config) -> str | None:
     return None
 
 
+def _pick_rate_limit_fallback(task: dict, config: Config, backends: dict) -> str | None:
+    """Pick any available agent that isn't the rate-limited one.
+
+    Unlike _pick_fallback_agent which only looks forward in the chain,
+    this searches all backends for an available alternative. Used when
+    rate limits are detected — the failing agent's position in the
+    chain shouldn't prevent fallback to an earlier, working agent.
+    """
+    current = task.get("agent", "claude")
+    for agent_name in config.fallback_chain:
+        if agent_name != current and agent_name != "opencode" and agent_name in backends:
+            return agent_name
+    return None
+
+
 async def retry_with_ci_context(
     task: dict,
     ci_logs: str,

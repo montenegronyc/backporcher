@@ -18,6 +18,7 @@ from .dispatch_helpers import (
     _mark_issue_failed,
     _mark_issue_no_changes,
     _pick_fallback_agent,
+    _pick_rate_limit_fallback,
     _pick_retry_model,
     pick_retry_agent_and_model,
     sync_agent_credentials,
@@ -122,8 +123,8 @@ async def dispatch_task(
             # don't burn retry slots on an exhausted API quota.
             if is_rate_limited:
                 fallback_count = task.get("agent_fallback_count", 0) or 0
-                next_agent = _pick_fallback_agent(task, config)
-                if next_agent and next_agent in backends:
+                next_agent = _pick_rate_limit_fallback(task, config, backends)
+                if next_agent:
                     new_fallback = fallback_count + 1
                     await db.update_task(
                         task_id,
