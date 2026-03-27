@@ -81,6 +81,32 @@ async def sync_agent_credentials(config: Config):
             log.warning("Failed to sync credentials: %s", err.strip())
 
 
+async def _mark_issue_no_changes(task: dict, db: Database):
+    """Clean up GitHub labels when a task completes with no changes.
+
+    Removes backporcher-in-progress and adds backporcher-failed so the issue
+    doesn't get stuck with a stale label that blocks re-pickup by the poller.
+    """
+    issue_num = task.get("github_issue_number")
+    if not issue_num:
+        return
+    repo = await db.get_repo(task["repo_id"])
+    if not repo:
+        return
+    repo_full = repo_full_name_from_url(repo["github_url"])
+    await update_issue_labels(
+        repo_full,
+        issue_num,
+        add=["backporcher-failed"],
+        remove=["backporcher-in-progress"],
+    )
+    await comment_on_issue(
+        repo_full,
+        issue_num,
+        "Agent completed but produced no changes.\n\nRe-add the `backporcher` label to retry.",
+    )
+
+
 def _pick_retry_model(current_model: str, retry_count: int) -> str:
     """Escalate model on retry. Sonnet -> opus after first attempt."""
     if current_model == "sonnet" and retry_count >= 1:
@@ -92,48 +118,45 @@ def _pick_retry_model(current_model: str, retry_count: int) -> str:
 def pick_retry_agent_and_model(task: dict, retry_count: int, config: "Config", backends: dict) -> tuple[str, str]:
     """Pick agent + model for a retry attempt.
 
-    Strategy (sonnet fails on claude):
-      retry 1: try kimi/sonnet
-      retry 2: try gemini/sonnet
-      retry 3: try claude/opus (escalate model as last resort)
+    Strategy: escalate model on the SAME agent first, then fall back to
+    a different agent only when retries are exhausted for the current one.
+    This ensures each agent gets a fair shot (including model escalation)
+    before rotating to the next one.
 
-    Never falls back to opencode (local model, lower capability).
+      retry 1: same agent, escalate model (sonnet -> opus)
+      retry 2: same agent, opus (second attempt)
+      retry 3: same agent, opus (third attempt — if still failing,
+               the exhausted-fallback in dispatch.py switches agents)
     """
     current_agent = task.get("agent", config.default_agent)
     current_model = task.get("model", config.default_model)
 
-    # Try next agent in fallback chain (skips opencode)
-    next_agent = _pick_fallback_agent(task, config)
-    if next_agent and next_agent in backends and next_agent != "opencode":
-        log.info(
-            "Agent fallback: %s -> %s (retry %d)",
-            current_agent,
-            next_agent,
-            retry_count,
-        )
-        return next_agent, current_model
-
-    # No more agents to try — escalate model on original agent
+    # Escalate model on the same agent
     escalated = _pick_retry_model(current_model, retry_count)
     log.info(
         "Model escalation: %s/%s -> %s/%s (retry %d)",
         current_agent,
         current_model,
-        config.default_agent,
+        current_agent,
         escalated,
         retry_count,
     )
-    return config.default_agent, escalated
+    return current_agent, escalated
 
 
 def _pick_fallback_agent(task: dict, config: Config) -> str | None:
-    """Return the next agent in the fallback chain, or None if exhausted."""
+    """Return the next agent in the fallback chain, or None if exhausted.
+
+    Skips 'opencode' (local model, lower capability).
+    """
     chain = config.fallback_chain
     current = task.get("agent", "claude")
     try:
         idx = chain.index(current)
-        if idx + 1 < len(chain):
-            return chain[idx + 1]
+        for i in range(idx + 1, len(chain)):
+            candidate = chain[i]
+            if candidate != "opencode":
+                return candidate
     except ValueError:
         pass
     return None

@@ -27,6 +27,20 @@ from .repo_intel import get_learnings_text
 
 log = logging.getLogger("backporcher.agent")
 
+# Patterns in stderr that indicate a rate limit / quota exhaustion.
+# These trigger immediate agent fallback without burning retry slots.
+RATE_LIMIT_PATTERNS = (
+    "429",
+    "rate limit",
+    "rate_limit",
+    "quota exceeded",
+    "quota_exceeded",
+    "resource exhausted",
+    "resource_exhausted",
+    "too many requests",
+    "overloaded",
+)
+
 
 async def run_agent(
     task: dict,
@@ -126,6 +140,7 @@ async def run_agent(
     output_summary = None
     last_content: list[str] = []
     content_size = 0
+    rate_limited = False
 
     async def read_stream():
         nonlocal output_summary, content_size
@@ -160,10 +175,29 @@ async def run_agent(
                         )
 
     async def read_stderr():
+        nonlocal rate_limited
         async for raw_line in proc.stderr:
             line = raw_line.decode(errors="replace").strip()
             if line:
                 await db.add_log(task["id"], f"stderr: {line[:TRUNCATE_LOG_LINE]}", level="warn")
+                # Detect rate limit / quota exhaustion in stderr
+                if not rate_limited:
+                    line_lower = line.lower()
+                    for pattern in RATE_LIMIT_PATTERNS:
+                        if pattern in line_lower:
+                            rate_limited = True
+                            log.warning(
+                                "Task %d: rate limit detected for agent %s: %s",
+                                task["id"],
+                                agent_name,
+                                line[:200],
+                            )
+                            await db.add_log(
+                                task["id"],
+                                f"Rate limit detected for {agent_name}",
+                                level="error",
+                            )
+                            break
 
     try:
         await asyncio.wait_for(
@@ -197,6 +231,9 @@ async def run_agent(
         task["id"],
         f"Agent exited with code {proc.returncode}",
     )
+
+    # Stash rate_limited flag on the task dict so dispatch can read it
+    task["_rate_limited"] = rate_limited
 
     return proc.returncode, output_summary
 
