@@ -10,11 +10,37 @@ from .github_base import CIStatus, _run_gh
 log = logging.getLogger("backporcher.github")
 
 
+# Checks to exclude from CI status evaluation.  These are GitHub features
+# or third-party bots, not actual CI jobs.  They can stay QUEUED/PENDING
+# indefinitely and would otherwise block the merge pipeline.
+_IGNORED_CHECK_NAMES = frozenset({
+    "auto-merge",
+})
+_IGNORED_CHECK_PREFIXES = (
+    "coderabbit",
+    "codecov",
+    "sonarcloud",
+    "dependabot",
+)
+
+
+def _is_ignored_check(name: str) -> bool:
+    """Return True if this check should be excluded from CI evaluation."""
+    lower = name.lower()
+    if lower in _IGNORED_CHECK_NAMES:
+        return True
+    return any(lower.startswith(p) for p in _IGNORED_CHECK_PREFIXES)
+
+
 async def get_pr_ci_status(
     repo_full_name: str,
     pr_number: int,
 ) -> CIStatus:
-    """Check CI status of a PR using statusCheckRollup."""
+    """Check CI status of a PR using statusCheckRollup.
+
+    Filters out non-CI checks (Auto-merge, CodeRabbit, etc.) that can
+    stay QUEUED/PENDING indefinitely and would otherwise block merges.
+    """
     rc, out, err = await _run_gh(
         "pr",
         "view",
@@ -33,7 +59,17 @@ async def get_pr_ci_status(
     except json.JSONDecodeError:
         return CIStatus(state="pending", failed_checks=[], total=0, completed=0)
 
-    checks = data.get("statusCheckRollup", []) or []
+    raw_checks = data.get("statusCheckRollup", []) or []
+
+    # Filter out non-CI checks before evaluation
+    checks = []
+    for check in raw_checks:
+        name = check.get("name") or check.get("context") or "unknown"
+        if _is_ignored_check(name):
+            log.debug("CI status: ignoring non-CI check %r", name)
+            continue
+        checks.append(check)
+
     if not checks:
         return CIStatus(state="no_checks", failed_checks=[], total=0, completed=0)
 
@@ -56,7 +92,6 @@ async def get_pr_ci_status(
             if conclusion and conclusion not in ("SUCCESS", "NEUTRAL", "SKIPPED"):
                 failed.append(name)
         elif check.get("__typename") == "StatusContext":
-            # StatusContext (e.g. CodeRabbit) uses a top-level `state` field, not `conclusion`
             state_val = (check.get("state") or "").upper()
             if state_val in ("SUCCESS", "NEUTRAL"):
                 completed += 1

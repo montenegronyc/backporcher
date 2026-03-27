@@ -60,6 +60,8 @@ Available agents: {enabled_agents}
 - **kimi**: Good general capability, cost-effective. Single/multi-file
   changes, bug fixes.
 - **codex**: OpenAI-backed. Straightforward implementations, boilerplate.
+- **gemini**: Google-backed. Good for general-purpose tasks, research-
+  heavy issues, documentation, and multi-file changes.
 
 ## Issue
 **Title:** {title}
@@ -89,6 +91,7 @@ Available agents: {enabled_agents}
 - **claude**: Most capable. Complex multi-file changes, architectural work.
 - **kimi**: Cost-effective. Single/multi-file changes, bug fixes.
 - **codex**: OpenAI-backed. Straightforward implementations, boilerplate.
+- **gemini**: Google-backed. General-purpose, research-heavy issues, docs.
 
 ## Issues (same repo: {repo_name})
 {issues_block}

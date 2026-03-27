@@ -63,7 +63,7 @@ class Config:
     codex_api_key: str = ""
     gemini_api_key: str = ""
     opencode_model: str = ""  # e.g. "local/Qwen3.5-9B-Q4_K_M.gguf"
-    enabled_agents: tuple[str, ...] = ("claude",)
+    enabled_agents: tuple[str, ...] = ()  # empty = auto-discover from backends
     default_agent: str = "claude"
     fallback_chain: tuple[str, ...] = ("claude", "kimi", "codex", "gemini", "opencode")
 
@@ -108,7 +108,7 @@ def load_config() -> Config:
         gemini_api_key=os.environ.get("GEMINI_API_KEY", ""),
         opencode_model=os.environ.get("BACKPORCHER_OPENCODE_MODEL", ""),
         enabled_agents=tuple(
-            a.strip() for a in os.environ.get("BACKPORCHER_ENABLED_AGENTS", "claude").split(",") if a.strip()
+            a.strip() for a in os.environ.get("BACKPORCHER_ENABLED_AGENTS", "").split(",") if a.strip()
         ),
         default_agent=os.environ.get("BACKPORCHER_DEFAULT_AGENT", "claude").strip(),
         fallback_chain=tuple(

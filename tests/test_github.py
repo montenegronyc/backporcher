@@ -8,6 +8,7 @@ from src.github import (
     extract_pr_number_from_url,
     repo_full_name_from_url,
 )
+from src.github_pr import _is_ignored_check
 
 
 class TestRepoFullNameFromUrl:
@@ -60,6 +61,32 @@ class TestCIStatus:
     def test_no_checks(self):
         ci = CIStatus(state="no_checks", failed_checks=[], total=0, completed=0)
         assert ci.state == "no_checks"
+
+
+class TestIgnoredChecks:
+    def test_auto_merge_ignored(self):
+        assert _is_ignored_check("Auto-merge") is True
+        assert _is_ignored_check("auto-merge") is True
+
+    def test_coderabbit_ignored(self):
+        assert _is_ignored_check("CodeRabbit") is True
+        assert _is_ignored_check("coderabbit/summary") is True
+
+    def test_codecov_ignored(self):
+        assert _is_ignored_check("codecov/patch") is True
+
+    def test_sonarcloud_ignored(self):
+        assert _is_ignored_check("SonarCloud Code Analysis") is True
+
+    def test_dependabot_ignored(self):
+        assert _is_ignored_check("dependabot") is True
+
+    def test_real_ci_not_ignored(self):
+        assert _is_ignored_check("Rust (macOS ARM64 Metal)") is False
+        assert _is_ignored_check("Rust (Windows x64 CUDA)") is False
+        assert _is_ignored_check("ci") is False
+        assert _is_ignored_check("build") is False
+        assert _is_ignored_check("test") is False
 
 
 class TestGitHubIssue:

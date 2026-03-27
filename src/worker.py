@@ -44,6 +44,18 @@ class WorkerDaemon:
         self._tasks: set[asyncio.Task] = set()
         self.backends = discover_backends(config)
 
+        # Auto-populate enabled_agents from discovered backends when not
+        # explicitly configured.  This ensures triage and batch orchestration
+        # see all available backends without requiring BACKPORCHER_ENABLED_AGENTS.
+        if not config.enabled_agents and self.backends:
+            discovered = tuple(self.backends.keys())
+            # frozen dataclass — replace via object.__setattr__
+            object.__setattr__(config, "enabled_agents", discovered)
+            log.info("Auto-enabled agents from discovery: %s", list(discovered))
+        # Guarantee at least "claude" so triage always has a valid choice.
+        if not config.enabled_agents:
+            object.__setattr__(config, "enabled_agents", ("claude",))
+
     async def run(self):
         """Launch concurrent loops (4 core + optional dashboard)."""
         self._running = True
