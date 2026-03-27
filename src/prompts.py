@@ -55,13 +55,23 @@ GitHub issue, decide which AI agent and model should work on it.
 
 ## Agents Available
 Available agents: {enabled_agents}
-- **claude**: Most capable. Complex multi-file changes, architectural
-  work, cross-file reasoning. Most expensive.
-- **kimi**: Good general capability, cost-effective. Single/multi-file
-  changes, bug fixes.
-- **codex**: OpenAI-backed. Straightforward implementations, boilerplate.
-- **gemini**: Google-backed. Good for general-purpose tasks, research-
-  heavy issues, documentation, and multi-file changes.
+
+Distribute work across agents. Do NOT default to claude for everything.
+Use this routing guide:
+
+- **gemini**: DEFAULT CHOICE for medium-complexity work. Multi-file
+  feature implementations, bug fixes touching 2-5 files, adding new
+  endpoints/commands, research-heavy issues, documentation. Prefer
+  gemini for most tasks that need more than a trivial fix.
+- **codex**: Good for scoped implementations, single-file features,
+  boilerplate generation, config changes, adding tests, straightforward
+  multi-file changes with clear instructions.
+- **kimi**: Cost-effective alternative for bug fixes, single-file
+  changes, small features. Good general capability.
+- **claude**: RESERVE for the hardest tasks only — complex architectural
+  changes, cross-cutting refactors touching 5+ files, new subsystems,
+  state management rewrites, tasks requiring deep cross-file reasoning.
+  Do not use claude when gemini or codex can handle it.
 
 ## Issue
 **Title:** {title}
@@ -74,6 +84,9 @@ Analyze the issue scope and complexity. Consider:
 2. Does it require architectural decisions or just following instructions?
 3. Is it a patch/fix or a structural change?
 4. How much code will likely be written (< 100 lines = sonnet, > 300 lines = opus)?
+
+Route to gemini or codex by default. Only escalate to claude for
+genuinely complex architectural work.
 
 Respond with exactly one line: AGENT: <agent> MODEL: <model> \u2014 {{reason}}
 """
@@ -88,17 +101,22 @@ for the same repository, analyze them together and produce a plan.
 
 ## Agents Available
 Available agents: {enabled_agents}
-- **claude**: Most capable. Complex multi-file changes, architectural work.
-- **kimi**: Cost-effective. Single/multi-file changes, bug fixes.
-- **codex**: OpenAI-backed. Straightforward implementations, boilerplate.
-- **gemini**: Google-backed. General-purpose, research-heavy issues, docs.
+
+Distribute work across agents — do NOT assign everything to claude.
+- **gemini**: DEFAULT for medium-complexity. Multi-file features, 2-5 file bug fixes,
+  new endpoints/commands, research-heavy issues, docs. Prefer for most tasks.
+- **codex**: Scoped implementations, single-file features, boilerplate, config, tests.
+- **kimi**: Cost-effective bug fixes, single-file changes, small features.
+- **claude**: RESERVE for hardest tasks only — architectural changes, cross-cutting
+  refactors (5+ files), new subsystems, deep cross-file reasoning.
 
 ## Issues (same repo: {repo_name})
 {issues_block}
 
 ## Instructions
 For each issue, determine:
-1. **agent**: one of the available agents listed above
+1. **agent**: one of the available agents listed above. Spread work across gemini, codex,
+   and kimi. Only use claude for the most complex issues in the batch.
 2. **model**: "sonnet" or "opus"
 3. **priority**: integer 1 to {n_issues}. 1 = run first. No duplicates.
 4. **depends_on**: issue number this depends on, or null. Use when changes would conflict \
@@ -108,6 +126,7 @@ Rules:
 - Only set depends_on for genuine ordering requirements (file conflicts, sequential changes)
 - Independent issues can run in parallel (no dependency needed)
 - Priority reflects logical ordering: foundational changes first
+- Aim for at most 30% of tasks on claude, spread the rest across gemini/codex/kimi
 
 ## Response Format
 Respond with ONLY a JSON array, no markdown fences:
