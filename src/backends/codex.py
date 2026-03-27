@@ -41,11 +41,15 @@ class CodexBackend:
 
     def build_env(self, base_env: dict[str, str]) -> dict[str, str]:
         """
-        Return a cleaned copy of *base_env* with sensitive variables removed
-        and CODEX_API_KEY injected.
+        Return a cleaned copy of *base_env* with sensitive variables removed.
+
+        Only injects CODEX_API_KEY when a real API key is configured.
+        When using OAuth (auth.json), the CLI handles auth itself and
+        injecting a placeholder key would override it.
         """
         env = {k: v for k, v in base_env.items() if k not in SENSITIVE_ENV_VARS}
-        env["CODEX_API_KEY"] = self._api_key
+        if self._api_key and not self._api_key.startswith("oauth"):
+            env["CODEX_API_KEY"] = self._api_key
         return env
 
     def parse_output_line(self, line: str) -> AgentEvent | None:
@@ -93,5 +97,7 @@ class CodexBackend:
         return f"codex/{task_model}"
 
     def required_env_vars(self) -> dict[str, str]:
-        """Return the CODEX_API_KEY required by this backend."""
-        return {"CODEX_API_KEY": self._api_key}
+        """Return the CODEX_API_KEY required by this backend, if any."""
+        if self._api_key and not self._api_key.startswith("oauth"):
+            return {"CODEX_API_KEY": self._api_key}
+        return {}
