@@ -85,7 +85,10 @@ def discover_backends(config) -> dict[str, AgentBackend]:
         from .kimi import KimiBackend  # noqa: PLC0415
 
         backends["kimi"] = KimiBackend(api_key=kimi_key)
-        log.debug("discover_backends: kimi registered (auth=%s)", "api_key" if kimi_key and not kimi_key.startswith("oauth") else "oauth")
+        log.debug(
+            "discover_backends: kimi registered (auth=%s)",
+            "api_key" if kimi_key and not kimi_key.startswith("oauth") else "oauth",
+        )
 
     # Codex — needs CLI + (API key OR OAuth auth.json on disk).
     codex_key = getattr(config, "codex_api_key", "") or ""
@@ -94,7 +97,10 @@ def discover_backends(config) -> dict[str, AgentBackend]:
         from .codex import CodexBackend  # noqa: PLC0415
 
         backends["codex"] = CodexBackend(api_key=codex_key)
-        log.debug("discover_backends: codex registered (auth=%s)", "api_key" if codex_key and not codex_key.startswith("oauth") else "oauth")
+        log.debug(
+            "discover_backends: codex registered (auth=%s)",
+            "api_key" if codex_key and not codex_key.startswith("oauth") else "oauth",
+        )
 
     # Gemini CLI — needs CLI; API key optional (may use gcloud auth).
     gemini_key = getattr(config, "gemini_api_key", "") or ""

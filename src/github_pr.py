@@ -13,9 +13,11 @@ log = logging.getLogger("backporcher.github")
 # Checks to exclude from CI status evaluation.  These are GitHub features
 # or third-party bots, not actual CI jobs.  They can stay QUEUED/PENDING
 # indefinitely and would otherwise block the merge pipeline.
-_IGNORED_CHECK_NAMES = frozenset({
-    "auto-merge",
-})
+_IGNORED_CHECK_NAMES = frozenset(
+    {
+        "auto-merge",
+    }
+)
 _IGNORED_CHECK_PREFIXES = (
     "coderabbit",
     "codecov",

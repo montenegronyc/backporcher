@@ -98,9 +98,7 @@ async def monitor_ci(db: Database, config: Config) -> None:
         await process_retry(db, config, task)
 
 
-async def _handle_no_checks(
-    db: Database, task: dict, pr_number: int, config: Config | None = None
-) -> None:
+async def _handle_no_checks(db: Database, task: dict, pr_number: int, config: Config | None = None) -> None:
     """Handle PRs with no CI checks configured.
 
     In full-auto mode, treat no-CI as passed and proceed to merge.
