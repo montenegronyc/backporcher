@@ -42,15 +42,23 @@ class KimiBackend:
             "-w",
             str(worktree_path),
         ]
-        if model and model != _KIMI_DEFAULT_MODEL:
+        # Never pass backporcher model names (sonnet/opus) to kimi — it only
+        # knows its own models (kimi-code/kimi-for-coding). Let kimi use its
+        # configured default unless the model is an actual kimi model ID.
+        if model and "/" in model and model != _KIMI_DEFAULT_MODEL:
             cmd.extend(["-m", model])
         return cmd
 
     def build_env(self, base_env: dict[str, str]) -> dict[str, str]:
-        """Return a cleaned copy of *base_env* with sensitive variables removed
-        and ``KIMI_API_KEY`` injected."""
+        """Return a cleaned copy of *base_env* with sensitive variables removed.
+
+        Only injects KIMI_API_KEY when a real API key is configured.
+        When using OAuth (file-based credentials), the CLI handles
+        auth itself and injecting a placeholder key would override it.
+        """
         env = {k: v for k, v in base_env.items() if k not in SENSITIVE_ENV_VARS}
-        env["KIMI_API_KEY"] = self._api_key
+        if self._api_key and not self._api_key.startswith("oauth"):
+            env["KIMI_API_KEY"] = self._api_key
         return env
 
     def parse_output_line(self, line: str) -> AgentEvent | None:
@@ -96,5 +104,7 @@ class KimiBackend:
         return f"kimi/{task_model}"
 
     def required_env_vars(self) -> dict[str, str]:
-        """Return the ``KIMI_API_KEY`` required by the Kimi CLI."""
-        return {"KIMI_API_KEY": self._api_key}
+        """Return the ``KIMI_API_KEY`` required by the Kimi CLI, if any."""
+        if self._api_key and not self._api_key.startswith("oauth"):
+            return {"KIMI_API_KEY": self._api_key}
+        return {}

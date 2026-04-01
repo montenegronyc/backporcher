@@ -78,21 +78,29 @@ def discover_backends(config) -> dict[str, AgentBackend]:
         backends["claude"] = ClaudeBackend()
         log.debug("discover_backends: claude registered")
 
-    # Kimi — needs CLI + API key.
+    # Kimi — needs CLI + (API key OR OAuth credentials on disk).
     kimi_key = getattr(config, "kimi_api_key", "") or ""
-    if kimi_key and shutil.which("kimi") is not None:
+    kimi_has_oauth = Path.home().joinpath(".kimi", "credentials").is_dir()
+    if shutil.which("kimi") is not None and (kimi_key or kimi_has_oauth):
         from .kimi import KimiBackend  # noqa: PLC0415
 
         backends["kimi"] = KimiBackend(api_key=kimi_key)
-        log.debug("discover_backends: kimi registered")
+        log.debug(
+            "discover_backends: kimi registered (auth=%s)",
+            "api_key" if kimi_key and not kimi_key.startswith("oauth") else "oauth",
+        )
 
-    # Codex — needs CLI + API key.
+    # Codex — needs CLI + (API key OR OAuth auth.json on disk).
     codex_key = getattr(config, "codex_api_key", "") or ""
-    if codex_key and shutil.which("codex") is not None:
+    codex_has_oauth = Path.home().joinpath(".codex", "auth.json").is_file()
+    if shutil.which("codex") is not None and (codex_key or codex_has_oauth):
         from .codex import CodexBackend  # noqa: PLC0415
 
         backends["codex"] = CodexBackend(api_key=codex_key)
-        log.debug("discover_backends: codex registered")
+        log.debug(
+            "discover_backends: codex registered (auth=%s)",
+            "api_key" if codex_key and not codex_key.startswith("oauth") else "oauth",
+        )
 
     # Gemini CLI — needs CLI; API key optional (may use gcloud auth).
     gemini_key = getattr(config, "gemini_api_key", "") or ""

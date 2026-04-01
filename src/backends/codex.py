@@ -26,6 +26,13 @@ class CodexBackend:
         Codex uses -C to set the working directory, so worktree_path is
         passed as a flag rather than via subprocess cwd=.
         """
+        # Map backporcher model names to Codex-compatible models.
+        # Codex uses OpenAI models — sonnet/opus are Claude names it doesn't know.
+        codex_model = {
+            "sonnet": "o4-mini",
+            "opus": "o3",
+            "haiku": "o4-mini",
+        }.get(model, model)
         return [
             "codex",
             "exec",
@@ -36,16 +43,20 @@ class CodexBackend:
             "-C",
             str(worktree_path),
             "-m",
-            model,
+            codex_model,
         ]
 
     def build_env(self, base_env: dict[str, str]) -> dict[str, str]:
         """
-        Return a cleaned copy of *base_env* with sensitive variables removed
-        and CODEX_API_KEY injected.
+        Return a cleaned copy of *base_env* with sensitive variables removed.
+
+        Only injects CODEX_API_KEY when a real API key is configured.
+        When using OAuth (auth.json), the CLI handles auth itself and
+        injecting a placeholder key would override it.
         """
         env = {k: v for k, v in base_env.items() if k not in SENSITIVE_ENV_VARS}
-        env["CODEX_API_KEY"] = self._api_key
+        if self._api_key and not self._api_key.startswith("oauth"):
+            env["CODEX_API_KEY"] = self._api_key
         return env
 
     def parse_output_line(self, line: str) -> AgentEvent | None:
@@ -83,7 +94,10 @@ class CodexBackend:
 
         if etype == "turn.failed":
             error = event.get("error", "") or ""
-            return AgentEvent(type="error", content=error, is_error=True, raw=event)
+            # error may be a dict like {"message": "..."} — extract the string
+            if isinstance(error, dict):
+                error = error.get("message", "") or str(error)
+            return AgentEvent(type="error", content=str(error), is_error=True, raw=event)
 
         log.debug("CodexBackend.parse_output_line: unrecognised event type %r", etype)
         return None
@@ -93,5 +107,7 @@ class CodexBackend:
         return f"codex/{task_model}"
 
     def required_env_vars(self) -> dict[str, str]:
-        """Return the CODEX_API_KEY required by this backend."""
-        return {"CODEX_API_KEY": self._api_key}
+        """Return the CODEX_API_KEY required by this backend, if any."""
+        if self._api_key and not self._api_key.startswith("oauth"):
+            return {"CODEX_API_KEY": self._api_key}
+        return {}

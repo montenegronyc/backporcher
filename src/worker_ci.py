@@ -44,7 +44,7 @@ async def monitor_ci(db: Database, config: Config) -> None:
         if ci.state == "success":
             await handle_ci_passed(db, config, task, repo_full)
         elif ci.state == "no_checks":
-            await _handle_no_checks(db, task, pr_number)
+            await _handle_no_checks(db, task, pr_number, config=config)
         elif ci.state == "failure":
             await handle_ci_failure(db, config, task, repo_full, ci)
 
@@ -98,9 +98,25 @@ async def monitor_ci(db: Database, config: Config) -> None:
         await process_retry(db, config, task)
 
 
-async def _handle_no_checks(db: Database, task: dict, pr_number: int) -> None:
-    """Log a one-time warning when no CI checks are configured."""
+async def _handle_no_checks(db: Database, task: dict, pr_number: int, config: Config | None = None) -> None:
+    """Handle PRs with no CI checks configured.
+
+    In full-auto mode, treat no-CI as passed and proceed to merge.
+    Otherwise, log a warning and block.
+    """
     task_id = task["id"]
+
+    # In full-auto mode, skip CI requirement — merge immediately.
+    if config and config.approval_mode == "full-auto":
+        await db.add_log(
+            task_id,
+            "No CI checks configured — auto-merging (full-auto mode)",
+        )
+        log.info("Task #%d: no CI checks, auto-merging (full-auto)", task_id)
+        repo_full = repo_full_name_from_url(task["github_url"])
+        await handle_ci_passed(db, config, task, repo_full)
+        return
+
     logs = await db.get_logs(task_id, limit=50)
     already_warned = any("no CI checks configured" in (entry.get("message", "")) for entry in logs)
     if not already_warned:

@@ -16,7 +16,9 @@ from .constants import (
 from .db import Database
 from .dispatch_helpers import (
     _mark_issue_failed,
+    _mark_issue_no_changes,
     _pick_fallback_agent,
+    _pick_rate_limit_fallback,
     _pick_retry_model,
     pick_retry_agent_and_model,
     sync_agent_credentials,
@@ -115,6 +117,48 @@ async def dispatch_task(
         if exit_code != 0:
             retry_count = task.get("retry_count", 0)
             max_retries = config.max_task_retries
+            is_rate_limited = task.get("_rate_limited", False)
+
+            # Rate-limited agents skip straight to agent fallback —
+            # don't burn retry slots on an exhausted API quota.
+            if is_rate_limited:
+                fallback_count = task.get("agent_fallback_count", 0) or 0
+                next_agent = _pick_rate_limit_fallback(task, config, backends)
+                if next_agent:
+                    new_fallback = fallback_count + 1
+                    await db.update_task(
+                        task_id,
+                        status="queued",
+                        error_message=None,
+                        started_at=None,
+                        branch_name=None,
+                        worktree_path=None,
+                        retry_count=0,
+                        agent=next_agent,
+                        agent_fallback_count=new_fallback,
+                        model=task.get("model", config.default_model),
+                    )
+                    await db.add_log(
+                        task_id,
+                        f"Rate limit on {task_agent} — immediate fallback to {next_agent} (fallback {new_fallback})",
+                        level="warn",
+                    )
+                    log.info(
+                        "Task %d: rate limit on %s, immediate fallback to %s (fallback %d)",
+                        task_id,
+                        task_agent,
+                        next_agent,
+                        new_fallback,
+                    )
+                    await db.record_metric(
+                        "rate_limit_fallback",
+                        task_id=task_id,
+                        repo=task.get("repo_name"),
+                        model=config.default_model,
+                    )
+                    await cleanup_task_artifacts(task, db)
+                    return
+                # No fallback available — fall through to normal retry logic
 
             if retry_count < max_retries:
                 new_count = retry_count + 1
@@ -314,6 +358,7 @@ async def dispatch_task(
                 completed_at=now,
             )
             await db.add_log(task_id, "Completed (no changes)")
+            await _mark_issue_no_changes(task, db)
             await cleanup_task_artifacts(task, db)
 
     except Exception as e:
