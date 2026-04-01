@@ -26,6 +26,13 @@ class CodexBackend:
         Codex uses -C to set the working directory, so worktree_path is
         passed as a flag rather than via subprocess cwd=.
         """
+        # Map backporcher model names to Codex-compatible models.
+        # Codex uses OpenAI models — sonnet/opus are Claude names it doesn't know.
+        codex_model = {
+            "sonnet": "o4-mini",
+            "opus": "o3",
+            "haiku": "o4-mini",
+        }.get(model, model)
         return [
             "codex",
             "exec",
@@ -36,7 +43,7 @@ class CodexBackend:
             "-C",
             str(worktree_path),
             "-m",
-            model,
+            codex_model,
         ]
 
     def build_env(self, base_env: dict[str, str]) -> dict[str, str]:

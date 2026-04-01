@@ -42,7 +42,10 @@ class KimiBackend:
             "-w",
             str(worktree_path),
         ]
-        if model and model != _KIMI_DEFAULT_MODEL:
+        # Never pass backporcher model names (sonnet/opus) to kimi — it only
+        # knows its own models (kimi-code/kimi-for-coding). Let kimi use its
+        # configured default unless the model is an actual kimi model ID.
+        if model and "/" in model and model != _KIMI_DEFAULT_MODEL:
             cmd.extend(["-m", model])
         return cmd
 
