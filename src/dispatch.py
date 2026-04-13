@@ -32,8 +32,10 @@ from .git_ops import (
     setup_worktree,
 )
 from .github import comment_on_issue, repo_full_name_from_url
+from .reflection import format_reflection_for_prompt, run_reflection
 from .repo_intel import detect_and_store_stack, record_learning
 from .review import create_pr
+from .safety import run_safety_scan
 
 log = logging.getLogger("backporcher.dispatch")
 
@@ -118,6 +120,19 @@ async def dispatch_task(
             retry_count = task.get("retry_count", 0)
             max_retries = config.max_task_retries
             is_rate_limited = task.get("_rate_limited", False)
+
+            # Run reflection to diagnose the failure before retry.
+            # Advisory only — never blocks the retry path.
+            reflection = None
+            if not is_rate_limited and retry_count < max_retries:
+                try:
+                    reflection = await run_reflection(task, summary or "", config, db)
+                    if reflection:
+                        # Augment the task prompt with reflection for the retry
+                        reflection_text = format_reflection_for_prompt(reflection)
+                        task["prompt"] = f"{task['prompt']}\n\n{reflection_text}"
+                except Exception:
+                    log.debug("Reflection failed, proceeding with retry", exc_info=True)
 
             # Rate-limited agents skip straight to agent fallback —
             # don't burn retry slots on an exhausted API quota.
@@ -325,6 +340,36 @@ async def dispatch_task(
                 if exit_code != 0:
                     # Let the outer exception handler deal with retry/escalation
                     raise RuntimeError(f"Verify fix agent exited with code {exit_code}")
+
+        # Pre-PR safety scan
+        scan_result = await run_safety_scan(worktree_path, task_id, db)
+        if scan_result.has_blockers:
+            now = datetime.now(timezone.utc).isoformat()
+            blocker_summary = scan_result.format_for_review()
+            await db.update_task(
+                task_id,
+                status="failed",
+                error_message=f"Safety scan blocked PR: {scan_result.summary()}"[:TRUNCATE_ERROR_MESSAGE],
+                completed_at=now,
+            )
+            await db.add_log(task_id, f"Safety scan BLOCKED: {scan_result.summary()}", level="error")
+            await record_learning(
+                db,
+                task["repo_id"],
+                task_id,
+                "safety_blocked",
+                f"Safety scan blocked PR: {blocker_summary[:TRUNCATE_REASON]}",
+            )
+            await _mark_issue_failed(
+                task,
+                db,
+                f"Safety scan blocked PR creation:\n{blocker_summary[:500]}",
+            )
+            await cleanup_task_artifacts(task, db)
+            cascaded = await db.handle_dependency_failure(task_id)
+            if cascaded:
+                log.info("Task #%d failure cascaded to tasks: %s", task_id, cascaded)
+            return
 
         # Create PR
         await db.add_log(task_id, "Creating pull request...")

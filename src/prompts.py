@@ -136,6 +136,32 @@ Respond with ONLY a JSON object (no markdown fences):
 {{"conflict": true/false, "conflicting_task_id": <id>|null, "reason": "brief explanation"}}
 """
 
+REFLECTION_PROMPT_TEMPLATE = """\
+You are a failure diagnosis assistant for an automated code agent system.
+A task just failed. Analyze the error output and determine the root cause
+so the next retry attempt can fix it efficiently.
+
+## Task That Failed
+{task_prompt}
+
+## Error Output (last 3000 chars)
+```
+{error_output}
+```
+
+## Retry Context
+This is retry attempt #{retry_count}. Previous attempts failed with the above output.
+
+## Instructions
+Analyze the failure and respond with ONLY a JSON object (no markdown fences):
+{{
+    "root_cause": "One sentence describing what went wrong",
+    "error_pattern": "The error type/category (e.g. ImportError, TypeError, test failure, build error)",
+    "hypothesis": "Why this specific error occurred given the task",
+    "suggested_approach": "Concrete steps the next attempt should take to fix it"
+}}
+"""
+
 REVIEW_PROMPT_TEMPLATE = """\
 You are a code review coordinator. Your job is to review a PR created by an automated agent.
 

@@ -45,8 +45,10 @@ queued → working → pr_created → reviewing → reviewed → ci_passed → c
                               → reviewing → failed (coordinator rejected PR)
        → hold=dispatch_approval (review-all mode) → backporcher approve → working
        → failed (agent error / exit != 0)
+       → failed (safety scan blocked PR — secrets or dangerous patterns detected)
        → completed (agent ran but no changes to push)
        → queued (auto-retry on transient failure, up to 2x)
+       → hold=circuit_breaker (repo failure rate too high, auto-releases after cooldown)
 any    → cancelled (manual via CLI)
 ```
 
@@ -60,7 +62,7 @@ Controls how much human oversight the pipeline requires. Set via `BACKPORCHER_AP
 | `review-merge` | automatic | approval required | yes |
 | `review-all` | approval required | approval required | |
 
-**Hold system**: Tasks have a `hold` column. When set, the task is skipped by the relevant loop. Hold values: `merge_approval`, `dispatch_approval`, `user_hold`, `conflict_hold`. CLI commands: `backporcher approve <id>`, `backporcher hold <id>`, `backporcher release <id>`.
+**Hold system**: Tasks have a `hold` column. When set, the task is skipped by the relevant loop. Hold values: `merge_approval`, `dispatch_approval`, `user_hold`, `conflict_hold`, `circuit_breaker`. CLI commands: `backporcher approve <id>`, `backporcher hold <id>`, `backporcher release <id>`.
 
 **Conflict detection**: Before dispatching, Haiku checks if the new task overlaps in file footprint with in-flight tasks in the same repo. If conflict detected, the new task gets `depends_on_task_id` set to the conflicting task (serializes them via the existing dependency mechanism).
 
@@ -81,7 +83,10 @@ All Python modules are under 300 lines (soft ceiling 450 for justified cases lik
 | `src/review.py` | `run_review()`, `create_pr()` — coordinator review with blast radius analysis |
 | `src/triage.py` | `triage_issue()`, `orchestrate_batch()`, `check_task_conflict()` — issue→task creation |
 | `src/repo_intel.py` | `detect_stack()`, `record_learning()`, `get_learnings_text()` — per-repo intelligence |
-| `src/prompts.py` | All prompt templates: agent, navigation, triage, batch orchestration, conflict check, review |
+| `src/prompts.py` | All prompt templates: agent, navigation, triage, batch orchestration, conflict check, review, reflection |
+| `src/reflection.py` | `run_reflection()`, `format_reflection_for_prompt()` — haiku-powered failure diagnosis before retries |
+| `src/safety.py` | `run_safety_scan()` — pre-PR static analysis for secrets + dangerous patterns |
+| `src/circuit_breaker.py` | `check_circuit()`, `apply_circuit_breaker()` — per-repo failure rate protection |
 
 ### Worker Daemon
 | File | Purpose |
@@ -232,6 +237,47 @@ backporcher repo verify <name> <command>   # Set verify command
 backporcher repo verify <name>             # Clear verify command
 backporcher repo learnings <name>          # Show recorded learnings for a repo
 ```
+
+## Reflection (Failure Diagnosis)
+
+Before retrying a failed task, a cheap haiku call (`run_reflection()` in `reflection.py`) diagnoses the root cause. The structured output includes `root_cause`, `error_pattern`, `hypothesis`, and `suggested_approach`. This reflection is:
+
+1. **Fed into the retry prompt** — the next agent attempt gets a `## Failure Diagnosis` section explaining what went wrong and how to fix it
+2. **Stored in task logs** — visible in `backporcher status <id>` for observability
+3. **Advisory only** — if reflection fails (timeout, bad JSON), the retry proceeds without it
+
+**Cost:** ~$0.001 per reflection (haiku, 60s timeout). Only runs on agent failure retries, not on rate-limit fallbacks.
+
+## Safety Scan (Pre-PR Static Analysis)
+
+After build verification passes but before PR creation, `run_safety_scan()` in `safety.py` scans all changed files for:
+
+1. **Secrets** (severity: BLOCK) — AWS keys, GitHub tokens, private key blocks, API key assignments, Slack tokens, bearer tokens
+2. **Dangerous patterns** (severity: WARN) — `eval()`, `exec()`, `subprocess shell=True`, `os.system()`, `rm -rf /`, `chmod 777`, SQL injection via f-strings, disabled SSL verification, wildcard CORS
+
+**Behavior:**
+- **BLOCK findings** → task fails immediately, PR is never created, issue labeled `backporcher-failed`, learning recorded as `safety_blocked`
+- **WARN findings** → logged for observability, PR creation proceeds, coordinator review sees the warnings
+
+**Scope:** Only scans files changed by the agent (via `git diff`). Skips binary files, lock files, and non-code extensions. Shannon entropy detection for high-entropy strings is available but not currently wired to reduce false positives.
+
+## Circuit Breaker (Per-Repo Failure Protection)
+
+`circuit_breaker.py` tracks recent task outcomes per repo. When the failure rate exceeds a threshold, new tasks for that repo are held instead of dispatched.
+
+| Parameter | Value | Description |
+|-----------|-------|-------------|
+| `WINDOW_SECONDS` | 3600 | Look-back window (1 hour) |
+| `FAILURE_THRESHOLD` | 0.7 | Trip when >= 70% of recent tasks failed |
+| `MIN_TASKS_FOR_TRIP` | 3 | Minimum tasks in window before tripping |
+| `COOLDOWN_SECONDS` | 1800 | Half-open after 30 min cooldown |
+
+**States:**
+- **CLOSED** — normal operation, tasks dispatch freely
+- **OPEN** — too many recent failures, new tasks held with `hold=circuit_breaker`
+- **HALF-OPEN** — cooldown expired, one task allowed through to test recovery
+
+**Integration:** Checked in `try_claim_and_dispatch()` after claiming a task, before conflict detection. Fail-open: if the DB query fails, the task proceeds. Tasks held by the circuit breaker auto-release when the cooldown expires (the next claim attempt re-checks).
 
 ## GitHub Label Protocol
 
@@ -393,6 +439,10 @@ pip install -e . && sudo systemctl restart backporcher
 - **Graph prompt injection:** Function/class names from the graph flow into the coordinator prompt. Malicious names (e.g., `VERDICT_APPROVE`) are sanitized: `VERDICT` is stripped, names capped at 120 chars, graph data wrapped in `<graph-context>` untrusted-data delimiters.
 - **Navigation context cold start:** First dispatch after adding a new repo triggers graph build in preflight (can take minutes for large repos). Subsequent dispatches use incremental updates. If preflight is skipped, `generate_navigation_context()` falls back gracefully.
 - **Navigation model timeout:** The sonnet navigation call has a 60s hard timeout. If it hangs, the agent runs without navigation context. Set `BACKPORCHER_NAVIGATION_ENABLED=false` to disable entirely.
+- **Reflection false positives:** The haiku reflection call may misdiagnose failures, especially for complex multi-file errors. The reflection is advisory — the retry agent can ignore it if the diagnosis doesn't match what it finds. If reflections are consistently unhelpful, the cost is minimal (~$0.001/call) but the prompt bloat may waste context.
+- **Safety scan eval() false positives:** The `eval()` pattern matches legitimate uses (e.g., `ast.literal_eval()`). These show as WARN, not BLOCK, so they don't prevent PR creation. The coordinator review can assess whether the usage is safe.
+- **Circuit breaker and retries:** The circuit breaker counts tasks in terminal states (completed/failed). Tasks that are still retrying don't count toward the failure rate until they reach a terminal state. A burst of simultaneous failures from a broken CI pipeline can trip the breaker.
+- **Circuit breaker release:** Tasks held by `circuit_breaker` auto-release on the next poll cycle after cooldown expires. There's no background timer — release depends on the executor polling interval (5s).
 
 ## Solutions Directory
 

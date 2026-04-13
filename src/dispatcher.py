@@ -8,6 +8,8 @@ now live in dispatch.py, agent.py, repo_intel.py, prompts.py, triage.py, review.
 # Re-exports from agent.py
 from .agent import run_agent as run_agent  # noqa: F811
 from .agent import run_verify as run_verify  # noqa: F811
+from .circuit_breaker import apply_circuit_breaker as apply_circuit_breaker  # noqa: F811
+from .circuit_breaker import check_circuit as check_circuit  # noqa: F811
 from .dispatch import dispatch_task as dispatch_task  # noqa: F811
 from .dispatch_helpers import _mark_issue_failed as _mark_issue_failed  # noqa: F811
 from .dispatch_helpers import _mark_issue_no_changes as _mark_issue_no_changes  # noqa: F811
@@ -29,6 +31,8 @@ from .navigation import generate_navigation_context as generate_navigation_conte
 from .prompts import AGENT_PROMPT_TEMPLATE as AGENT_PROMPT_TEMPLATE  # noqa: F811
 
 # Re-exports from repo_intel.py (formerly in agent.py)
+from .reflection import format_reflection_for_prompt as format_reflection_for_prompt  # noqa: F811
+from .reflection import run_reflection as run_reflection  # noqa: F811
 from .repo_intel import detect_and_store_stack as detect_and_store_stack  # noqa: F811
 from .repo_intel import detect_stack as detect_stack  # noqa: F811
 from .repo_intel import get_learnings_text as get_learnings_text  # noqa: F811
@@ -36,6 +40,7 @@ from .repo_intel import record_learning as record_learning  # noqa: F811
 
 # Re-exports from review.py
 from .review import run_review as run_review  # noqa: F811
+from .safety import run_safety_scan as run_safety_scan  # noqa: F811
 
 # Re-exports from triage.py
 from .triage import check_task_conflict as check_task_conflict  # noqa: F811

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 
+from .circuit_breaker import apply_circuit_breaker
 from .config import Config
 from .db import Database
 from .dispatcher import (
@@ -231,6 +232,11 @@ async def try_claim_and_dispatch(db: Database, config: Config) -> dict | None:
     """
     task = await db.claim_next_queued()
     if not task:
+        return None
+
+    # Circuit breaker: hold task if repo has too many recent failures
+    held = await apply_circuit_breaker(task, db)
+    if held:
         return None
 
     # Guard against aiosqlite commit visibility race
